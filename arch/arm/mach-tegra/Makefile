@@ -8,3 +8,4 @@ obj-$(CONFIG_ARCH_TEGRA_2x_SOC)         += tegra2_clocks.o
 obj-$(CONFIG_ARCH_TEGRA_2x_SOC)         += timer.o
 obj-$(CONFIG_SMP)			+= platsmp.o localtimer.o headsmp.o
 obj-$(CONFIG_HOTPLUG_CPU)		+= hotplug.o
+obj-$(CONFIG_ARCH_TEGRA_2x_SOC)         += gpio.o
