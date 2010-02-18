@@ -25,7 +25,10 @@ static LIST_HEAD(clocks);
 static DEFINE_MUTEX(clocks_mutex);
 static DEFINE_SPINLOCK(clk_spinlock);
 
-extern struct clk_lookup tegra_clks[];
+extern struct clk_lookup tegra_clk_lookups[];
+extern struct clk tegra_periph_clks[];
+extern struct clk_lookup tegra_periph_clk_lookups[];
+extern int tegra_num_periph_clks;
 
 /**
  * clk_preinit - initialize any fields in the struct clk before clk init
@@ -130,15 +133,33 @@ EXPORT_SYMBOL(clk_enable_init_clocks);
 void tegra2_arch_clk_init(void); /* FIXME */
 
 int __init tegra_init_clock(void) {
+	int i;
 	struct clk_lookup *cl;
+	struct clk *c;
 
 	tegra2_arch_clk_init();
 
 	printk("%s\n", __FUNCTION__);
-	for (cl = tegra_clks; cl->clk != NULL; cl++) {
+	for (cl = tegra_clk_lookups; cl->clk != NULL; cl++) {
+		clk_preinit(cl->clk);
+		printk("%s\n", cl->clk->name);
 		if (cl->clk->ops && cl->clk->ops->init)
 			cl->clk->ops->init(cl->clk);
+		clkdev_add(cl);
+		clk_register(cl->clk);
+	}
+
+	for (i = 0; i < tegra_num_periph_clks; i++) {
+		c = &tegra_periph_clks[i];
+		cl = &tegra_periph_clk_lookups[i];
+		cl->dev_id = c->dev_id;
+		cl->con_id = c->con_id;
+		cl->clk = c;
+
+		printk("%s\n", cl->clk->name);
 		clk_preinit(cl->clk);
+		if (cl->clk->ops && cl->clk->ops->init)
+			cl->clk->ops->init(cl->clk);
 		clkdev_add(cl);
 		clk_register(cl->clk);
 	}
