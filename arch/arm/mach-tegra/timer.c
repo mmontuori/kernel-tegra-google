@@ -132,7 +132,7 @@ void __init tegra_init_timer(void) {
 	struct clk *c;
 	int ret;
 
-	c = clk_get_sys("timer_us", "clk");
+	c = clk_get_sys("timer", NULL);
 	printk("Timer clock rate %lu\n", clk_get_rate(c));
 
 	switch (clk_get_rate(c)) {
