@@ -14,12 +14,13 @@
  *
  */
 
-#define ENABLE_ON_INIT 1
-#define DIV_U71 2
-#define DIV_U71_FIXED 4
-#define MUX 8
-#define PLL_FIXED 16
-
+#define ENABLE_ON_INIT	0x00000001
+#define DIV_U71 	0x00000002
+#define DIV_U71_FIXED	0x00000004
+#define DIV_2		0x00000008
+#define PLL_FIXED 	0x00000010
+#define PLL_HAS_CPCON 	0x00000020
+#define MUX		0x00000040
 struct clk;
 
 struct clk_mux_sel {
@@ -55,6 +56,8 @@ struct clk {
 	u32				flags;
 	u32				refcnt;
 	const char			*name;
+	const char			*dev_id;
+	const char                      *con_id;
 	u32				reg;
 	u32				reg_shift;
 	unsigned int                    clk_num;
