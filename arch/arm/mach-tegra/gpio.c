@@ -219,26 +219,23 @@ static void tegra_gpio_irq_handler(unsigned int irq, struct irq_desc *desc)
 
 	for (port = 0; port < 4; port++) {
 		int gpio = tegra_gpio_compose(bank->bank, port, 0);
-		u8 sta = __raw_readl(GPIO_INT_STA(gpio)) &
+		unsigned long sta = __raw_readl(GPIO_INT_STA(gpio)) &
 			__raw_readl(GPIO_INT_ENB(gpio));
 		u32 lvl = __raw_readl(GPIO_INT_LVL(gpio));
 
-		for (pin = 0; pin < 8; pin++) {
-			if (sta & (1 << pin)) {
-				__raw_writel(1 << pin,
-					     GPIO_INT_CLR(gpio));
+		for_each_bit(pin, &sta, 8) {
+			__raw_writel(1 << pin, GPIO_INT_CLR(gpio));
 
-				/* if gpio is edge triggered, clear condition
-				 * before executing the hander so that we don't
-				 * miss edges
-				 */
-				if (lvl & (0x100 << pin)) {
-					unmasked = 1;
-					desc->chip->unmask(irq);
-				}
-
-				generic_handle_irq(gpio_to_irq(gpio + pin));
+			/* if gpio is edge triggered, clear condition
+			 * before executing the hander so that we don't
+			 * miss edges
+			 */
+			if (lvl & (0x100 << pin)) {
+				unmasked = 1;
+				desc->chip->unmask(irq);
 			}
+
+			generic_handle_irq(gpio_to_irq(gpio + pin));
 		}
 	}
 
