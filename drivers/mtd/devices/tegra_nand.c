@@ -1442,7 +1442,7 @@ tegra_nand_probe(struct platform_device *pdev)
 	}
 
 	/* TODO: configure pinmux here?? */
-	info->clk = clk_get(&pdev->dev, "clk");
+	info->clk = clk_get(&pdev->dev, NULL);
 	clk_set_rate(info->clk, 108000000);
 
 	cfg_hwstatus_mon(info);
