@@ -288,7 +288,7 @@ static void __init tegra_harmony_init(void) {
 	clk_enable(clk);
 	clk_set_rate(clk, 216000000);
 
-	clk = clk_get_sys("uart.3", "clk");
+	clk = clk_get_sys("uart.3", NULL);
 	clk_set_rate(clk, 216000000);
 	clk_enable(clk);
 
