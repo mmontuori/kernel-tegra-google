@@ -43,7 +43,8 @@ extern void gic_unmask_irq(unsigned int);
 extern void gic_ack_irq(unsigned int);
 extern void gic_set_cpu(unsigned int, const struct cpumask*);
 
-static void tegra2_mask_irq(unsigned int irq) {
+static void tegra2_mask_irq(unsigned int irq)
+{
 	//void __iomem *base;
 	//printk("%s: %d\n", __FUNCTION__, irq);
 	gic_mask_irq(irq);
@@ -53,7 +54,8 @@ static void tegra2_mask_irq(unsigned int irq) {
 	//__raw_writel(1 << (irq & 31), base + ICTLR_CPU_IER_CLR);
 }
 
-static void tegra2_unmask_irq(unsigned int irq) {
+static void tegra2_unmask_irq(unsigned int irq)
+{
 	//void __iomem *base;
 	//printk("%s: %d\n", __FUNCTION__, irq);
 	gic_unmask_irq(irq);
@@ -63,13 +65,15 @@ static void tegra2_unmask_irq(unsigned int irq) {
 	//__raw_writel(1 << (irq & 31), base + ICTLR_CPU_IER_SET);
 }
 
-static void tegra2_ack_irq(unsigned int irq) {
+static void tegra2_ack_irq(unsigned int irq)
+{
 	//printk("%s: %d\n", __FUNCTION__, irq);
 	gic_ack_irq(irq);
 }
 
 #ifdef CONFIG_SMP
-static void tegra2_set_cpu(unsigned int irq, const struct cpumask *mask_val) {
+static void tegra2_set_cpu(unsigned int irq, const struct cpumask *mask_val)
+{
 	gic_set_cpu(irq, mask_val);
 }
 #endif
@@ -85,11 +89,12 @@ static struct irq_chip tegra_irq_chip = {
 };
 #endif
 
-void __init tegra_init_irq(void) {
+void __init tegra_init_irq(void)
+{
 	/*int i;*/
 
 	printk("%s\n", __FUNCTION__);
-	gic_dist_init(0, IO_ADDRESS(TEGRA_ARM_INT_DIST_BASE), 32);
+	gic_dist_init(0, IO_ADDRESS(TEGRA_ARM_INT_DIST_BASE), 29);
 	gic_cpu_init(0, IO_ADDRESS(TEGRA_ARM_PERIF_BASE + 0x100));
 
 	/*for (i=0; i<4; i++) {

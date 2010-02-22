@@ -20,9 +20,12 @@
 #include <linux/clockchips.h>
 #include <linux/clocksource.h>
 #include <linux/clk.h>
+
 #include <asm/mach/time.h>
 #include <asm/io.h>
 #include <asm/mach/time.h>
+#include <asm/localtimer.h>
+
 #include <mach/iomap.h>
 
 #define TIMERUS_CNTR_1US 0x10
@@ -100,8 +103,7 @@ static struct clock_event_device tegra_clockevent = {
 	.set_mode	= tegra_timer_set_mode,
 };
 
-static struct clocksource tegra_clocksource =
-{
+static struct clocksource tegra_clocksource = {
 	.name	= "timer_us",
 	.rating	= 300,
 	.read	= tegra_clocksource_read,
@@ -128,9 +130,14 @@ static struct irqaction tegra_timer_irq = {
 	.irq            = TIMER1_IRQ,
 };
 
-void __init tegra_init_timer(void) {
+void __init tegra_init_timer(void)
+{
 	struct clk *c;
 	int ret;
+
+#ifdef CONFIG_HAVE_ARM_TWD
+	twd_base = IO_ADDRESS(TEGRA_ARM_PERIF_BASE + 0x600);
+#endif
 
 	c = clk_get_sys("timer", NULL);
 	printk("Timer clock rate %lu\n", clk_get_rate(c));
