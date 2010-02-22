@@ -23,6 +23,7 @@
 #include <asm/mach/time.h>
 #include <asm/io.h>
 #include <asm/mach/time.h>
+#include <asm/localtimer.h>
 #include <mach/iomap.h>
 
 #define TIMERUS_CNTR_1US 0x10
@@ -131,6 +132,10 @@ static struct irqaction tegra_timer_irq = {
 void __init tegra_init_timer(void) {
 	struct clk *c;
 	int ret;
+
+#ifdef CONFIG_HAVE_ARM_TWD
+	twd_base = IO_ADDRESS(TEGRA_ARM_PERIF_BASE + 0x600);
+#endif
 
 	c = clk_get_sys("timer", NULL);
 	printk("Timer clock rate %lu\n", clk_get_rate(c));

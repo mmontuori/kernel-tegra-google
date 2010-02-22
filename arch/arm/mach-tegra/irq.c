@@ -89,7 +89,7 @@ void __init tegra_init_irq(void) {
 	/*int i;*/
 
 	printk("%s\n", __FUNCTION__);
-	gic_dist_init(0, IO_ADDRESS(TEGRA_ARM_INT_DIST_BASE), 32);
+	gic_dist_init(0, IO_ADDRESS(TEGRA_ARM_INT_DIST_BASE), 29);
 	gic_cpu_init(0, IO_ADDRESS(TEGRA_ARM_PERIF_BASE + 0x100));
 
 	/*for (i=0; i<4; i++) {

@@ -19,6 +19,8 @@
 
 #define INT_GIC_BASE			0
 
+#define IRQ_LOCALTIMER                  29
+
 /* Primary Interrupt Controller */
 #define INT_PRI_BASE			(INT_GIC_BASE + 32)
 #define INT_TMR1			(INT_PRI_BASE + 0)
