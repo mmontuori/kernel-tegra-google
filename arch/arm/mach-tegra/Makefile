@@ -1,5 +1,6 @@
 obj-y += irq.o
 obj-y += io.o
+obj-y += pinmux.o
 
 obj-${CONFIG_MACH_HARMONY} += board-harmony.o
 
