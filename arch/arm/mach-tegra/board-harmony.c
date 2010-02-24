@@ -23,6 +23,7 @@
 #include <linux/mtd/partitions.h>
 #include <linux/dma-mapping.h>
 #include <linux/fsl_devices.h>
+#include <linux/pda_power.h>
 
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
@@ -277,11 +278,24 @@ static struct platform_device androidusb_device = {
         },
 };
 
+/* PDA power */
+static struct pda_power_pdata pda_power_pdata = {
+};
+
+static struct platform_device pda_power_device = {
+	.name   = "pda_power",
+	.id     = -1,
+	.dev    = {
+		.platform_data  = &pda_power_pdata,
+	},
+};
+
 static struct platform_device *harmony_devices[] __initdata = {
 	&debug_uart,
 	&tegra_nand_device,
 	&tegra_otg,
-	&androidusb_device
+	&androidusb_device,
+	&pda_power_device,
 };
 
 static void __init tegra_harmony_init(void) {
