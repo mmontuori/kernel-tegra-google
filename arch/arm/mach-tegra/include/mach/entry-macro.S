@@ -13,14 +13,14 @@
  *
  */
 #include <mach/iomap.h>
-
+#include <mach/io.h>
 
 #if defined(CONFIG_ARM_GIC)
 
 #include <asm/hardware/gic.h>
 
 	/* Uses the GIC interrupt controller built into the cpu */
-#define ICTRL_BASE (0xfc040100)
+#define ICTRL_BASE (IO_CPU_VIRT + 0x100)
 
 	.macro	disable_fiq
 	.endm
