@@ -621,6 +621,11 @@ static struct clk_mux_sel mux_clk_m[] = {
 	{ 0, 0},
 };
 
+static struct clk_mux_sel mux_clk_32k[] = {
+	{ .input = &tegra_clk_32k, .value = 0},
+	{ 0, 0},
+};
+
 #define PERIPH_CLK(_name, _dev, _con, _clk_num, _reg, _inputs, _flags) \
 	{						\
 		.name      = _name,			\
@@ -634,6 +639,7 @@ static struct clk_mux_sel mux_clk_m[] = {
 	}
 
 struct clk tegra_periph_clks[] = {
+	PERIPH_CLK("rtc",       "rtc-tegra", NULL,   4,  0,     mux_clk_32k,                    0),
 	PERIPH_CLK("timer",     "timer",     NULL,   5,  0,     mux_clk_m,                      0),
 	PERIPH_CLK("i2s1",      "i2s.0",     NULL,   11, 0x100, mux_plla_audio_pllp_clkm,       MUX | DIV_U71),
 	PERIPH_CLK("i2s2",      "i2s.1",     NULL,   18, 0x104, mux_plla_audio_pllp_clkm,       MUX | DIV_U71),
@@ -685,8 +691,8 @@ struct clk tegra_periph_clks[] = {
 	PERIPH_CLK("tvo",       "tvo",       NULL,   49, 0x188, mux_pllp_plld_pllc_clkm,        MUX | DIV_U71),
 	PERIPH_CLK("hdmi",      "hdmi",      NULL,   51, 0x18c, mux_pllp_plld_pllc_clkm,        MUX | DIV_U71),
 	PERIPH_CLK("tvdac",     "tvdac",     NULL,   53, 0x194, mux_pllp_plld_pllc_clkm,        MUX | DIV_U71),
-	PERIPH_CLK("disp1",     "disp1",     NULL,   27, 0x138, mux_pllp_plld_pllc_clkm,        MUX | DIV_U71),
-	PERIPH_CLK("disp2",     "disp2",     NULL,   26, 0x13c, mux_pllp_plld_pllc_clkm,        MUX | DIV_U71),
+	PERIPH_CLK("disp1",     "tegrafb.0",     NULL,   27, 0x138, mux_pllp_plld_pllc_clkm,        MUX | DIV_U71),
+	PERIPH_CLK("disp2",     "tegrafb.1",     NULL,   26, 0x13c, mux_pllp_plld_pllc_clkm,        MUX | DIV_U71),
 };
 const int tegra_num_periph_clks = ARRAY_SIZE(tegra_periph_clks);
 
