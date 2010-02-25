@@ -1,4 +1,5 @@
 /*
+ * arch/arm/mach-tegra/board-harmony.c
  *
  * Copyright (C) 2010 Google, Inc.
  *
@@ -36,6 +37,8 @@
 #include <mach/nand.h>
 
 #include <linux/usb/android_composite.h>
+
+#include "board-harmony.h"
 
 /* NVidia bootloader tags */
 #define ATAG_NVIDIA		0x41000801
@@ -291,6 +294,8 @@ static void __init tegra_harmony_init(void) {
 	clk = clk_get_sys("uart.3", NULL);
 	clk_set_rate(clk, 216000000);
 	clk_enable(clk);
+
+	harmony_pinmux_init();
 
 	tegra_nand_device.dev.platform_data = &harmony_nand_data;
 
