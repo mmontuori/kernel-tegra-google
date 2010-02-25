@@ -37,17 +37,20 @@ extern int tegra_num_periph_clks;
  * Initialize any struct clk fields needed before normal clk initialization
  * can run.  No return value.
  */
-void clk_preinit(struct clk *clk) {
+void clk_preinit(struct clk *clk)
+{
 }
 
-int clk_register(struct clk *clk) {
+int clk_register(struct clk *clk)
+{
 	mutex_lock(&clocks_mutex);
 	list_add(&clk->node, &clocks);
 	mutex_unlock(&clocks_mutex);
 	return 0;
 }
 
-int clk_enable(struct clk *c) {
+int clk_enable(struct clk *c)
+{
 	int ret = 0;
 	unsigned long flags;
 	if (c->refcnt == 0) {
@@ -74,7 +77,8 @@ err:
 }
 EXPORT_SYMBOL(clk_enable);
 
-void clk_disable(struct clk *c) {
+void clk_disable(struct clk *c)
+{
 	unsigned long flags;
 	if (c->refcnt == 0) {
 		WARN(1, "Attempting to disable clock %s with refcnt 0", c->name);
@@ -94,7 +98,8 @@ void clk_disable(struct clk *c) {
 }
 EXPORT_SYMBOL(clk_disable);
 
-int clk_set_parent(struct clk *c, struct clk *parent) {
+int clk_set_parent(struct clk *c, struct clk *parent)
+{
 	if (c->ops && c->ops->set_parent)
 		return c->ops->set_parent(c, parent);
 	else
@@ -102,7 +107,8 @@ int clk_set_parent(struct clk *c, struct clk *parent) {
 }
 EXPORT_SYMBOL(clk_set_parent);
 
-int clk_set_rate(struct clk *c, unsigned long rate) {
+int clk_set_rate(struct clk *c, unsigned long rate)
+{
 	if (c->ops && c->ops->set_rate)
 		return c->ops->set_rate(c, rate);
 	else
@@ -110,7 +116,8 @@ int clk_set_rate(struct clk *c, unsigned long rate) {
 }
 EXPORT_SYMBOL(clk_set_rate);
 
-unsigned long clk_get_rate(struct clk *c) {
+unsigned long clk_get_rate(struct clk *c)
+{
 	if (c->ops && c->ops->get_rate)
 		return c->ops->get_rate(c);
 	else if (c->parent)
@@ -120,7 +127,8 @@ unsigned long clk_get_rate(struct clk *c) {
 }
 EXPORT_SYMBOL(clk_get_rate);
 
-void clk_enable_init_clocks(void) {
+void clk_enable_init_clocks(void)
+{
 	struct clk *clkp;
 
 	list_for_each_entry(clkp, &clocks, node) {
@@ -132,7 +140,8 @@ EXPORT_SYMBOL(clk_enable_init_clocks);
 
 void tegra2_arch_clk_init(void); /* FIXME */
 
-int __init tegra_init_clock(void) {
+int __init tegra_init_clock(void)
+{
 	int i;
 	struct clk_lookup *cl;
 	struct clk *c;

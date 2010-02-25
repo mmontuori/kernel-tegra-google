@@ -40,12 +40,14 @@ static void __iomem *reg_clk_base;
 #define clk_readl(reg) \
 	__raw_readl((u32)reg_clk_base + (reg))
 
-void tegra2_arch_clk_init(void) {
+void tegra2_arch_clk_init(void)
+{
 	reg_clk_base = IO_ADDRESS(TEGRA_CLK_RESET_BASE);
 }
 EXPORT_SYMBOL(tegra2_arch_clk_init);
 
-static int clk_div71_possible_rate(struct clk *c, unsigned long rate) {
+static int clk_div71_possible_rate(struct clk *c, unsigned long rate)
+{
 	unsigned long input_rate = clk_get_rate(c);
 	int divider_u71;
 
@@ -62,17 +64,20 @@ static int tegra2_clk_enable(struct clk *c) {
 	return 0;
 }
 
-static void tegra2_clk_disable(struct clk *c) {
+static void tegra2_clk_disable(struct clk *c)
+{
 	printk("%s on clock %s\n", __FUNCTION__, c->name);
 }
 
-static unsigned long tegra2_clk_get_rate(struct clk *c) {
+static unsigned long tegra2_clk_get_rate(struct clk *c)
+{
 	printk("%s on clock %s\n", __FUNCTION__, c->name);
 	return c->rate;
 }
 
 /* clk_m functions */
-static unsigned long tegra2_clk_m_autodetect_rate(struct clk *c) {
+static unsigned long tegra2_clk_m_autodetect_rate(struct clk *c)
+{
 	u32 clock_autodetect;
 	u32 auto_clock_control = clk_readl(0x50) & ~(3<<30);
 	clk_writel(0x80000001, 0x58);
@@ -102,18 +107,21 @@ static unsigned long tegra2_clk_m_autodetect_rate(struct clk *c) {
 	return c->rate;
 }
 
-static void tegra2_clk_m_init(struct clk *c) {
+static void tegra2_clk_m_init(struct clk *c)
+{
 	printk("%s on clock %s\n", __FUNCTION__, c->name);
 	tegra2_clk_m_autodetect_rate(c);
 }
 
-static int tegra2_clk_m_enable(struct clk *c) {
+static int tegra2_clk_m_enable(struct clk *c)
+{
 	int ret = 0;
 	printk("%s on clock %s\n", __FUNCTION__, c->name);
 	return ret;
 }
 
-static void tegra2_clk_m_disable(struct clk *c) {
+static void tegra2_clk_m_disable(struct clk *c)
+{
 	printk("%s on clock %s\n", __FUNCTION__, c->name);
 	BUG();
 }
@@ -126,7 +134,8 @@ static struct clk_ops tegra_clk_m_ops = {
 };
 
 /* PLL Functions */
-static int tegra2_pll_clk_set_rate(struct clk *c, unsigned long rate) {
+static int tegra2_pll_clk_set_rate(struct clk *c, unsigned long rate)
+{
 	u32 reg;
 	unsigned long input_rate;
 	const struct clk_pll_table *sel;
@@ -163,7 +172,8 @@ static int tegra2_pll_clk_set_rate(struct clk *c, unsigned long rate) {
 	return 1;
 }
 
-static int tegra2_pll_clk_enable(struct clk *c) {
+static int tegra2_pll_clk_enable(struct clk *c)
+{
 	int ret = 0;
 	u32 reg;
 	printk("%s on clock %s\n", __FUNCTION__, c->name);
@@ -176,7 +186,8 @@ static int tegra2_pll_clk_enable(struct clk *c) {
 	return ret;
 }
 
-static void tegra2_pll_clk_disable(struct clk *c) {
+static void tegra2_pll_clk_disable(struct clk *c)
+{
 	u32 reg;
 	printk("%s on clock %s\n", __FUNCTION__, c->name);
 
@@ -196,17 +207,20 @@ static struct clk_ops tegra_pll_ops = {
 
 
 /* Mux functions */
-static int tegra2_mux_clk_enable(struct clk *c) {
+static int tegra2_mux_clk_enable(struct clk *c)
+{
 	int ret = 0;
 	printk("%s on clock %s\n", __FUNCTION__, c->name);
 	return ret;
 }
 
-static void tegra2_mux_clk_disable(struct clk *c) {
+static void tegra2_mux_clk_disable(struct clk *c)
+{
 	printk("%s on clock %s\n", __FUNCTION__, c->name);
 }
 
-static int tegra2_mux_clk_set_parent(struct clk *c, struct clk *parent) {
+static int tegra2_mux_clk_set_parent(struct clk *c, struct clk *parent)
+{
 	int ret = 0;
 	printk("%s on clock %s\n", __FUNCTION__, c->name);
 	return ret;
@@ -219,7 +233,8 @@ static struct clk_ops tegra2_mux_clk_ops = {
 };
 
 /* Clock divider ops */
-static int tegra2_div_clk_set_rate(struct clk *c, unsigned long rate) {
+static int tegra2_div_clk_set_rate(struct clk *c, unsigned long rate)
+{
 	int ret = 0;
 	u32 reg;
 	u32 new_reg;
@@ -260,11 +275,13 @@ static struct clk_ops tegra_div_ops = {
 };
 
 /* Periph clk ops */
-static void tegra2_periph_clk_init(struct clk *c) {
+static void tegra2_periph_clk_init(struct clk *c)
+{
 	clk_set_parent(c, c->inputs[0].input);
 }
 
-static int tegra2_periph_clk_enable(struct clk *c) {
+static int tegra2_periph_clk_enable(struct clk *c)
+{
 	u32 reg;
 	reg = (1<<(c->clk_num%32));
 	clk_writel(reg, CLK_RST_CONTROLLER_CLK_OUT_ENB_SET_CLR + 8*(c->clk_num/32));
@@ -272,14 +289,16 @@ static int tegra2_periph_clk_enable(struct clk *c) {
 	return 0;
 }
 
-static void tegra2_periph_clk_disable(struct clk *c) {
+static void tegra2_periph_clk_disable(struct clk *c)
+{
 	u32 reg;
 	reg = (1<<(c->clk_num%32));
 	clk_writel(reg, CLK_RST_CONTROLLER_CLK_OUT_ENB_SET_CLR + 4 + 8*(c->clk_num/32));
 	clk_writel(reg, CLK_RST_CONTROLLER_RST_DEVICES_SET_CLR + 8*(c->clk_num/32));
 }
 
-static int tegra2_periph_clk_set_parent(struct clk *c, struct clk *p) {
+static int tegra2_periph_clk_set_parent(struct clk *c, struct clk *p)
+{
 	int ret = 0;
 	u32 reg;
 	const struct clk_mux_sel *sel;
@@ -296,7 +315,8 @@ static int tegra2_periph_clk_set_parent(struct clk *c, struct clk *p) {
 	return ret;
 }
 
-static int tegra2_periph_clk_set_rate(struct clk *c, unsigned long rate) {
+static int tegra2_periph_clk_set_rate(struct clk *c, unsigned long rate)
+{
 	int ret = 0;
 	u32 reg;
 	int divider_u71;
@@ -621,6 +641,11 @@ static struct clk_mux_sel mux_clk_m[] = {
 	{ 0, 0},
 };
 
+static struct clk_mux_sel mux_clk_32k[] = {
+	{ .input = &tegra_clk_32k, .value = 0},
+	{ 0, 0},
+};
+
 #define PERIPH_CLK(_name, _dev, _con, _clk_num, _reg, _inputs, _flags) \
 	{						\
 		.name      = _name,			\
@@ -634,6 +659,7 @@ static struct clk_mux_sel mux_clk_m[] = {
 	}
 
 struct clk tegra_periph_clks[] = {
+	PERIPH_CLK("rtc",       "rtc-tegra", NULL,   4,  0,     mux_clk_32k,                    0),
 	PERIPH_CLK("timer",     "timer",     NULL,   5,  0,     mux_clk_m,                      0),
 	PERIPH_CLK("i2s1",      "i2s.0",     NULL,   11, 0x100, mux_plla_audio_pllp_clkm,       MUX | DIV_U71),
 	PERIPH_CLK("i2s2",      "i2s.1",     NULL,   18, 0x104, mux_plla_audio_pllp_clkm,       MUX | DIV_U71),
@@ -685,8 +711,8 @@ struct clk tegra_periph_clks[] = {
 	PERIPH_CLK("tvo",       "tvo",       NULL,   49, 0x188, mux_pllp_plld_pllc_clkm,        MUX | DIV_U71),
 	PERIPH_CLK("hdmi",      "hdmi",      NULL,   51, 0x18c, mux_pllp_plld_pllc_clkm,        MUX | DIV_U71),
 	PERIPH_CLK("tvdac",     "tvdac",     NULL,   53, 0x194, mux_pllp_plld_pllc_clkm,        MUX | DIV_U71),
-	PERIPH_CLK("disp1",     "disp1",     NULL,   27, 0x138, mux_pllp_plld_pllc_clkm,        MUX | DIV_U71),
-	PERIPH_CLK("disp2",     "disp2",     NULL,   26, 0x13c, mux_pllp_plld_pllc_clkm,        MUX | DIV_U71),
+	PERIPH_CLK("disp1",     "tegrafb.0",     NULL,   27, 0x138, mux_pllp_plld_pllc_clkm,        MUX | DIV_U71),
+	PERIPH_CLK("disp2",     "tegrafb.1",     NULL,   26, 0x13c, mux_pllp_plld_pllc_clkm,        MUX | DIV_U71),
 };
 const int tegra_num_periph_clks = ARRAY_SIZE(tegra_periph_clks);
 
