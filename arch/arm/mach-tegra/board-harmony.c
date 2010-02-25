@@ -211,8 +211,8 @@ static u64 tegra_otg_dmamask = DMA_BIT_MASK(32);
 
 static struct resource tegra_otg_resources[] = {
         [0] = {
-                .start  = TEGRA_USB_PHYS,
-                .end    = TEGRA_USB_PHYS + TEGRA_USB_SIZE - 1,
+                .start  = TEGRA_USB_BASE,
+                .end    = TEGRA_USB_BASE + TEGRA_USB_SIZE - 1,
                 .flags  = IORESOURCE_MEM,
         },
         [1] = {
