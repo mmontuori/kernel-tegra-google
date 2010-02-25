@@ -29,6 +29,7 @@
 #include <asm/mach/arch.h>
 #include <asm/mach/time.h>
 #include <asm/setup.h>
+#include <asm/hardware/cache-l2x0.h>
 
 #include <mach/io.h>
 #include <mach/iomap.h>
@@ -343,6 +344,15 @@ static void __init tegra_fixup(struct machine_desc *desc, struct tag *tags,
 static void __init tegra_harmony_init(void)
 {
 	struct clk *clk;
+
+#ifdef CONFIG_CACHE_L2X0
+	void __iomem *p = IO_ADDRESS(TEGRA_ARM_PERIF_BASE) + 0x3000;
+
+	writel(0x331, p + L2X0_TAG_LATENCY_CTRL);
+	writel(0x441, p + L2X0_DATA_LATENCY_CTRL);
+
+	l2x0_init(p, 0x6C080001, 0x8200c3fe);
+#endif
 
 	clk = clk_get_sys(NULL, "pll_p");
 	clk_enable(clk);
