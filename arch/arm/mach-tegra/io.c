@@ -15,7 +15,9 @@
  */
 
 #include <linux/kernel.h>
+#include <linux/module.h>
 #include <linux/init.h>
+#include <linux/mm.h>
 
 #include <mach/hardware.h>
 #include <asm/io.h>
@@ -26,33 +28,47 @@
 
 static struct map_desc tegra_io_desc[] __initdata = {
 	{
-		.virtual = (unsigned long) IO_ADDRESS(IO_PPSB_PHYS),
+		.virtual = IO_PPSB_VIRT,
 		.pfn = __phys_to_pfn(IO_PPSB_PHYS),
-		.length = SZ_1M,
+		.length = IO_PPSB_SIZE,
 		.type = MT_DEVICE,
 	},
 	{
-		.virtual = (unsigned long) IO_ADDRESS(IO_APB_PHYS),
+		.virtual = IO_APB_VIRT,
 		.pfn = __phys_to_pfn(IO_APB_PHYS),
-		.length = SZ_1M,
+		.length = IO_APB_SIZE,
 		.type = MT_DEVICE,
 	},
 	{
-		.virtual = (unsigned long) IO_ADDRESS(IO_CPU_PHYS),
+		.virtual = IO_CPU_VIRT,
 		.pfn = __phys_to_pfn(IO_CPU_PHYS),
-		.length = SZ_1M,
+		.length = IO_CPU_SIZE,
 		.type = MT_DEVICE,
 	},
-	{
-		.virtual = (unsigned long) IO_ADDRESS(IO_EXCEP_PHYS),
-		.pfn = __phys_to_pfn(IO_EXCEP_VIRT),
-		.length = SZ_4K,
-		.type = MT_DEVICE,
-	}
 };
-
 
 void __init tegra_map_common_io(void)
 {
 	iotable_init(tegra_io_desc, ARRAY_SIZE(tegra_io_desc));
 }
+
+/*
+ * Intercept ioremap() requests for addresses in our fixed mapping regions.
+ */
+void __iomem *tegra_ioremap(unsigned long p, size_t size, unsigned int type)
+{
+	void __iomem *v = IO_ADDRESS(p);
+	if (v == NULL)
+		v = __arm_ioremap(p, size, type);
+	return v;
+}
+EXPORT_SYMBOL(tegra_ioremap);
+
+void tegra_iounmap(volatile void __iomem *addr)
+{
+	unsigned long virt = (unsigned long)addr;
+
+	if (virt >= VMALLOC_START && virt < VMALLOC_END)
+		__iounmap(addr);
+}
+EXPORT_SYMBOL(tegra_iounmap);
