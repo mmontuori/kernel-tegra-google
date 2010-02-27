@@ -328,6 +328,18 @@ static struct platform_device *harmony_devices[] __initdata = {
 	&pda_power_device,
 };
 
+static void __init tegra_fixup(struct machine_desc *desc, struct tag *tags,
+                                 char **cmdline, struct meminfo *mi)
+{
+        mi->nr_banks = 2;
+        mi->bank[0].start = PHYS_OFFSET;
+        mi->bank[0].node = PHYS_TO_NID(PHYS_OFFSET);
+        mi->bank[0].size = (448*1024*1024);
+        mi->bank[1].start = 512*1024*1024;
+        mi->bank[1].node = PHYS_TO_NID(512*1024*1024);
+        mi->bank[1].size = (512*1024*1024);
+}
+
 static void __init tegra_harmony_init(void) {
 	struct clk *clk;
 
@@ -350,6 +362,7 @@ MACHINE_START(HARMONY, "harmony")
 	.boot_params  = 0x00000100,
 	.phys_io        = IO_APB_PHYS,
 	.io_pg_offst    = ((IO_APB_VIRT) >> 18) & 0xfffc,
+	.fixup		= tegra_fixup,
 	.init_irq       = tegra_init_irq,
 	.init_machine   = tegra_harmony_init,
 	.map_io         = tegra_map_common_io,
