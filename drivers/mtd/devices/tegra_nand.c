@@ -826,6 +826,22 @@ prep_transfer_dma(struct tegra_nand_info *info, int rx, int do_ecc, uint32_t pag
 	writel((page >> 16) & 0xff, ADDR_REG2);
 }
 
+static dma_addr_t
+tegra_nand_dma_map(struct device *dev, void *addr, size_t size,
+                 enum dma_data_direction dir)
+{
+        struct page *page;
+        unsigned long offset = (unsigned long)addr & ~PAGE_MASK;
+        if (virt_addr_valid(addr))
+                page = virt_to_page(addr);
+        else {
+                if (WARN_ON(size + offset > PAGE_SIZE))
+                        return ~0;
+                page = vmalloc_to_page(addr);
+        }
+        return dma_map_page(dev, page, offset, size, dir);
+}
+
 /* if mode == RAW, then we read data only, with no ECC
  * if mode == PLACE, we read ONLY the OOB data from a raw offset into the spare
  * area (ooboffs).
@@ -908,7 +924,7 @@ do_read_oob(struct mtd_info *mtd, loff_t from, struct mtd_oob_ops *ops)
 
 		clear_regs(info);
 		if (datbuf)
-			datbuf_dma_addr = dma_map_single(info->dev, datbuf, a_len, DMA_FROM_DEVICE);
+			datbuf_dma_addr = tegra_nand_dma_map(info->dev, datbuf, a_len, DMA_FROM_DEVICE);
 
 		prep_transfer_dma(info, 1, do_ecc, page, column, datbuf_dma_addr,
 				  a_len, info->oob_dma_addr,
@@ -931,7 +947,7 @@ do_read_oob(struct mtd_info *mtd, loff_t from, struct mtd_oob_ops *ops)
 
 		/* if we are here, transfer is done */
 		if (datbuf)
-			dma_unmap_single(info->dev, datbuf_dma_addr, a_len, DMA_FROM_DEVICE);
+			dma_unmap_page(info->dev, datbuf_dma_addr, a_len, DMA_FROM_DEVICE);
 
 		if (oobbuf) {
 			uint32_t ofs = datbuf && oobbuf ? 4 : 0; /* skipped bytes */
@@ -1087,7 +1103,7 @@ do_write_oob(struct mtd_info *mtd, loff_t to, struct mtd_oob_ops *ops)
 		int b_len = min(oobsz, ooblen);
 
 		if (datbuf)
-			datbuf_dma_addr = dma_map_single(info->dev, datbuf, a_len, DMA_TO_DEVICE);
+			datbuf_dma_addr = tegra_nand_dma_map(info->dev, datbuf, a_len, DMA_TO_DEVICE);
 		if (oobbuf)
 			memcpy(info->oob_dma_buf, oobbuf, b_len);
 
@@ -1109,7 +1125,7 @@ do_write_oob(struct mtd_info *mtd, loff_t to, struct mtd_oob_ops *ops)
 		}
 
 		if (datbuf) {
-			dma_unmap_single(info->dev, datbuf_dma_addr, a_len, DMA_TO_DEVICE);
+			dma_unmap_page(info->dev, datbuf_dma_addr, a_len, DMA_TO_DEVICE);
 			len -= a_len;
 			datbuf += a_len;
 			ops->retlen += a_len;
