@@ -583,6 +583,29 @@ static struct clk tegra_pll_d_out0 = {
 	.parent    = &tegra_pll_d,
 };
 
+static struct clk_pll_table tegra_pll_u_table[] = {
+	{ 12000000, 480000000, 960, 12, 1, 0},
+	{ 13000000, 480000000, 960, 13, 1, 0},
+	{ 19200000, 480000000, 200, 4,  1, 0},
+	{ 26000000, 480000000, 960, 26, 1, 0},
+	{ 0, 0, 0, 0, 0, 0 },
+};
+
+static struct clk tegra_pll_u = {
+	.name      = "tegra_pll_u",
+	.flags     = 0,
+	.ops       = &tegra_pll_ops,
+	.reg       = 0xc0,
+	.input_min = 2000000,
+	.input_max = 40000000,
+	.parent    = &tegra_clk_m,
+	.cf_min    = 1000000,
+	.cf_max    = 6000000,
+	.vco_min   = 480000000,
+	.vco_max   = 960000000,
+	.pll_table = tegra_pll_u_table,
+};
+
 static struct clk_mux_sel mux_pllm_pllc_pllp_plla[] = {
 	{ .input = &tegra_pll_m, .value = 0},
 	{ .input = &tegra_pll_c, .value = 1},
@@ -710,6 +733,9 @@ struct clk tegra_periph_clks[] = {
 	PERIPH_CLK("tvdac",     "tvdac",      NULL,   53, 0x194, mux_pllp_plld_pllc_clkm,        MUX | DIV_U71),
 	PERIPH_CLK("disp1",     "tegrafb.0",  NULL,   27, 0x138, mux_pllp_plld_pllc_clkm,        MUX | DIV_U71),
 	PERIPH_CLK("disp2",     "tegrafb.1",  NULL,   26, 0x13c, mux_pllp_plld_pllc_clkm,        MUX | DIV_U71),
+	PERIPH_CLK("usbd",      "usb.0",      NULL,   22, 0,     mux_clk_m,                              0),
+	PERIPH_CLK("usb2",      "usb.1",      NULL,   58, 0,     mux_clk_m,                              0),
+	PERIPH_CLK("usb3",      "usb.2",      NULL,   59, 0,     mux_clk_m,                              0),
 };
 const int tegra_num_periph_clks = ARRAY_SIZE(tegra_periph_clks);
 
@@ -741,5 +767,6 @@ struct clk_lookup tegra_clk_lookups[] = {
 	CLK(NULL, "pll_a_out0", &tegra_pll_a_out0),
 	CLK(NULL, "pll_d",      &tegra_pll_d),
 	CLK(NULL, "pll_d_out0", &tegra_pll_d_out0),
+	CLK(NULL, "pll_u",      &tegra_pll_u),
 	CLK(NULL, NULL, NULL),
 };
