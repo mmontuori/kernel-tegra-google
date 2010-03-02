@@ -1,8 +1,9 @@
 /*
  * drivers/video/tegrafb.c
  *
- * Copyright (C) 2009 Palm, Inc.
- * Author: Travis Geiselbrecht <travis@palm.com>
+ * Copyright (C) 2010 Google, Inc.
+ * Author: Colin Cross <ccross@android.com>
+ *         Travis Geiselbrecht <travis@palm.com>
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -28,6 +29,7 @@
 #include <linux/clk.h>
 #include <linux/wait.h>
 #include <asm/cacheflush.h>
+#include <mach/tegra_fb.h>
 
 #define DEBUG 1
 
@@ -68,6 +70,9 @@
 #define DC_WIN_A_POSITION			0x704
 #define DC_WIN_A_SIZE				0x705
 #define DC_WIN_A_PRESCALED_SIZE			0x706
+#define DC_WIN_A_H_INITIAL_DDA			0x707
+#define DC_WIN_A_V_INITIAL_DDA			0x708
+#define DC_WIN_A_DDA_INCREMENT			0x709
 #define DC_WIN_A_LINE_STRIDE			0x70a
 #define DC_WIN_A_BUF_STRIDE			0x70b
 #define DC_WINBUF_A_START_ADDR			0x800
@@ -111,6 +116,8 @@ struct tegra_fb_info {
 	void __iomem *reg_base;
 	wait_queue_head_t event_wq;
 	unsigned int wait_condition;
+	int lcd_xres;
+	int lcd_yres;
 	int irq;
 };
 
@@ -220,6 +227,8 @@ static int tegra_fb_set_par(struct fb_info *info)
 	struct fb_var_screeninfo *var = &info->var;
 	struct fb_fix_screeninfo *fix = &info->fix;
 	u32 color_depth;
+	unsigned int h_dda;
+	unsigned int v_dda;
 
 	/* we only support RGB ordering for now */
 	switch (var->bits_per_pixel) {
@@ -247,11 +256,19 @@ static int tegra_fb_set_par(struct fb_info *info)
 	}
 	fix->line_length = var->xres * var->bits_per_pixel / 8;
 
-	tegra_fb_writel(tegra_fb, var->yres<<16 | var->xres, DC_WIN_A_SIZE);
-	tegra_fb_writel(tegra_fb, var->yres<<16 | fix->line_length, DC_WIN_A_PRESCALED_SIZE);
+	h_dda = (var->xres * 0x1000) / (tegra_fb->lcd_xres - 1);
+	v_dda = (var->yres * 0x1000) / (tegra_fb->lcd_yres - 1);
+
+	tegra_fb_writel(tegra_fb, tegra_fb->lcd_yres<<16 | tegra_fb->lcd_xres,
+		DC_WIN_A_SIZE);
+	tegra_fb_writel(tegra_fb, var->yres<<16 | fix->line_length,
+		DC_WIN_A_PRESCALED_SIZE);
+	tegra_fb_writel(tegra_fb, 0, DC_WIN_A_H_INITIAL_DDA);
+	tegra_fb_writel(tegra_fb, 0, DC_WIN_A_V_INITIAL_DDA);
+	tegra_fb_writel(tegra_fb, v_dda << 16 | h_dda, DC_WIN_A_DDA_INCREMENT);
 	tegra_fb_writel(tegra_fb, color_depth, DC_WIN_A_COLOR_DEPTH);
 	tegra_fb_writel(tegra_fb, fix->line_length, DC_WIN_A_LINE_STRIDE);
-	tegra_fb_activate(tegra_fb);
+	//tegra_fb_activate(tegra_fb);
 	return 0;
 }
 
@@ -373,6 +390,9 @@ static void dump_regs(struct tegra_fb_info *tegra_fb)
 	DUMP_REG(DC_WIN_A_POSITION);
 	DUMP_REG(DC_WIN_A_SIZE);
 	DUMP_REG(DC_WIN_A_PRESCALED_SIZE);
+	DUMP_REG(DC_WIN_A_H_INITIAL_DDA);
+	DUMP_REG(DC_WIN_A_V_INITIAL_DDA);
+	DUMP_REG(DC_WIN_A_DDA_INCREMENT);
 	DUMP_REG(DC_WIN_A_LINE_STRIDE);
 	DUMP_REG(DC_WIN_A_BUF_STRIDE);
 	DUMP_REG(DC_WINBUF_A_START_ADDR);
@@ -411,6 +431,7 @@ static int tegra_plat_probe(struct platform_device *pdev)
 	unsigned long fb_size;
 	unsigned long fb_phys;
 	int irq;
+	struct tegra_fb_lcd_data *lcd_data = pdev->dev.platform_data;
 
 	info = framebuffer_alloc(sizeof(struct tegra_fb_info), &pdev->dev);
 	if (!info) {
@@ -483,6 +504,8 @@ static int tegra_plat_probe(struct platform_device *pdev)
 	tegra_fb->reg_mem = reg_mem;
 	tegra_fb->reg_base = reg_base;
 	tegra_fb->irq = irq;
+	tegra_fb->lcd_xres = lcd_data->lcd_xres;
+	tegra_fb->lcd_yres = lcd_data->lcd_yres;
 
 	info->fbops = &tegra_fb_ops;
 	info->pseudo_palette = pseudo_palette;
@@ -495,38 +518,25 @@ static int tegra_plat_probe(struct platform_device *pdev)
 	info->fix.xpanstep   = 1;
 	info->fix.ypanstep   = 1;
 	info->fix.accel	  = FB_ACCEL_NONE;
-	info->fix.line_length = 1024 * 2;
 	info->fix.smem_start = fb_phys;
 	info->fix.smem_len = fb_size;
 
-	info->var.xres		= 1024;
-	info->var.yres		= 600;
-	info->var.xres_virtual   = 1024;
-	info->var.yres_virtual   = 1200;
-	info->var.bits_per_pixel = 16;
-	info->var.red.offset	= 11;
-	info->var.red.length	= 5;
-	info->var.red.msb_right	= 0;
-	info->var.green.offset	= 5;
-	info->var.green.length	= 6;
-	info->var.green.msb_right	= 0;
-	info->var.blue.offset	= 0;
-	info->var.blue.length	= 5;
-	info->var.blue.msb_right	= 0;
-	info->var.transp.offset	= 0;
-	info->var.transp.length	= 0;
-	info->var.transp.msb_right = 0;
-	info->var.activate	= FB_ACTIVATE_NOW;
+	info->var.xres			= lcd_data->fb_xres;
+	info->var.yres			= lcd_data->fb_yres;
+	info->var.xres_virtual		= lcd_data->fb_xres;
+	info->var.yres_virtual		= lcd_data->fb_yres*2;
+	info->var.bits_per_pixel	= lcd_data->bits_per_pixel;
+	info->var.activate		= FB_ACTIVATE_NOW;
 	info->var.height		= -1;
-	info->var.width		= -1;
-	info->var.pixclock	= 24500;
-	info->var.left_margin	= 0;
-	info->var.right_margin   = 0;
-	info->var.upper_margin   = 0;
-	info->var.lower_margin   = 0;
-	info->var.hsync_len	= 0;
-	info->var.vsync_len	= 0;
-	info->var.vmode		= FB_VMODE_NONINTERLACED;
+	info->var.width			= -1;
+	info->var.pixclock		= 24500;
+	info->var.left_margin		= 0;
+	info->var.right_margin   	= 0;
+	info->var.upper_margin   	= 0;
+	info->var.lower_margin   	= 0;
+	info->var.hsync_len		= 0;
+	info->var.vsync_len		= 0;
+	info->var.vmode			= FB_VMODE_NONINTERLACED;
 
 	if (request_irq(irq, tegra_fb_irq, IRQF_DISABLED,
 			dev_name(&pdev->dev), info)) {
@@ -540,9 +550,8 @@ static int tegra_plat_probe(struct platform_device *pdev)
 
 	/* Enable writes to Window A */
 	tegra_fb_writel(tegra_fb, 1<<4, DC_CMD_DISPLAY_WINDOW_HEADER);
-	tegra_fb_writel(tegra_fb, info->var.yres<<16 | info->var.xres, DC_WIN_A_SIZE);
-	tegra_fb_writel(tegra_fb, info->var.yres<<16 | info->fix.line_length, DC_WIN_A_PRESCALED_SIZE);
-	tegra_fb_writel(tegra_fb, info->fix.line_length, DC_WIN_A_LINE_STRIDE);
+
+	tegra_fb_set_par(info);
 
 	dev_info(&pdev->dev, "base address: %08x (%08x)\n",
 			(unsigned int)info->fix.smem_start,
