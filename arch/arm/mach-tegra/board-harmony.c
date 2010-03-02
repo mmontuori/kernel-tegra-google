@@ -291,39 +291,9 @@ static struct platform_device pda_power_device = {
 	},
 };
 
-/* Framebuffer */
-static struct resource fb_resource[] = {
-	[0] = {
-		.start  = INT_DISPLAY_GENERAL,
-		.end    = INT_DISPLAY_GENERAL,
-		.flags  = IORESOURCE_IRQ,
-	},
-	[1] = {
-		.start	= TEGRA_DISPLAY_BASE,
-		.end	= TEGRA_DISPLAY_BASE + TEGRA_DISPLAY_SIZE-1,
-		.flags	= IORESOURCE_MEM,
-	},
-	[2] = {
-		.start	= 0x1c012000,
-		.end	= 0x1c012000 + 0x300000 - 1,
-		.flags	= IORESOURCE_MEM,
-	},
-};
-
-static struct platform_device tegrafb_device = {
-	.name 		= "tegrafb",
-	.id		= 0,
-	.resource	= fb_resource,
-	.num_resources 	= ARRAY_SIZE(fb_resource),
-	.dev = {
-		.platform_data = NULL,
-	},
-};
-
 static struct platform_device *harmony_devices[] __initdata = {
 	&debug_uart,
 	&tegra_nand_device,
-	&tegrafb_device,
 	&tegra_otg,
 	&androidusb_device,
 	&pda_power_device,
