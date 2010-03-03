@@ -703,6 +703,10 @@ static void fsl_queue_td(struct fsl_ep *ep, struct fsl_req *req)
 	temp = req->head->td_dma & EP_QUEUE_HEAD_NEXT_POINTER_MASK;
 	dQH->next_dtd_ptr = cpu_to_le32(temp);
 
+	dma_sync_single_for_device(ep->udc->gadget.dev.parent,
+				   req->head->td_dma, sizeof(struct ep_td_struct),
+				   DMA_TO_DEVICE);
+
 	/* Clear active and halt bit */
 	temp = cpu_to_le32(~(EP_QUEUE_HEAD_STATUS_ACTIVE
 			| EP_QUEUE_HEAD_STATUS_HALT));
