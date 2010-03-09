@@ -26,6 +26,7 @@
 #define CACHE_LINE_SIZE		32
 
 static void __iomem *l2x0_base;
+bool l2x0_disabled;
 
 static inline void cache_wait_always(void __iomem *reg, unsigned long mask)
 {
@@ -236,6 +237,11 @@ void __init l2x0_init(void __iomem *base, __u32 aux_val, __u32 aux_mask)
 {
 	__u32 aux;
 
+	if (l2x0_disabled) {
+		printk(KERN_INFO "L2X0 cache controller disabled\n");
+		return;
+	}
+
 	l2x0_base = base;
 
 	/*
@@ -265,3 +271,10 @@ void __init l2x0_init(void __iomem *base, __u32 aux_val, __u32 aux_mask)
 
 	pr_info(L2CC_TYPE " cache controller enabled\n");
 }
+
+static int __init l2x0_disable(char *unused)
+{
+	l2x0_disabled = 1;
+	return 0;
+}
+early_param("nol2x0", l2x0_disable);
