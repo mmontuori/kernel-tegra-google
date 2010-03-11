@@ -845,6 +845,8 @@ u32 mmc_select_voltage(struct mmc_host *host, u32 ocr)
 {
 	int bit;
 
+	pr_warning("%08x %08x\n", ocr, host->ocr_avail);
+
 	ocr &= host->ocr_avail;
 
 	bit = ffs(ocr);
