@@ -662,6 +662,8 @@ static void fsl_queue_td(struct fsl_ep *ep, struct fsl_req *req)
 	int i = ep_index(ep) * 2 + ep_is_in(ep);
 	u32 temp, bitmask, tmp_stat;
 	struct ep_queue_head *dQH = &ep->udc->ep_qh[i];
+	struct ep_td_struct *td;
+	int j;
 
 	/* VDBG("QH addr Register 0x%8x", dr_regs->endpointlistaddr);
 	VDBG("ep_qh[%d] addr is 0x%8x", i, (u32)&(ep->udc->ep_qh[i])); */
@@ -670,6 +672,17 @@ static void fsl_queue_td(struct fsl_ep *ep, struct fsl_req *req)
 		? (1 << (ep_index(ep) + 16))
 		: (1 << (ep_index(ep)));
 
+	/* Flush all the dTD structs out to memory */
+	td = req->head;
+	for (j = 0; j < req->dtd_count; j++) {
+		dma_sync_single_for_device(ep->udc->gadget.dev.parent,
+					   td->td_dma, sizeof(struct ep_td_struct),
+					   ep_is_in(ep)
+						? DMA_TO_DEVICE
+						: DMA_FROM_DEVICE);
+		td = td->next_td_virt;
+	}
+
 	/* check if the pipe is empty */
 	if (!(list_empty(&ep->queue))) {
 		/* Add td to the end */
@@ -677,6 +690,11 @@ static void fsl_queue_td(struct fsl_ep *ep, struct fsl_req *req)
 		lastreq = list_entry(ep->queue.prev, struct fsl_req, queue);
 		lastreq->tail->next_td_ptr =
 			cpu_to_le32(req->head->td_dma & DTD_ADDR_MASK);
+		dma_sync_single_for_device(ep->udc->gadget.dev.parent,
+			   lastreq->tail->td_dma, sizeof(struct ep_td_struct),
+			   ep_is_in(ep)
+				? DMA_TO_DEVICE
+				: DMA_FROM_DEVICE);
 		/* Read prime bit, if 1 goto done */
 		if (fsl_readl(&dr_regs->endpointprime) & bitmask)
 			goto out;
@@ -702,10 +720,6 @@ static void fsl_queue_td(struct fsl_ep *ep, struct fsl_req *req)
 	/* Write dQH next pointer and terminate bit to 0 */
 	temp = req->head->td_dma & EP_QUEUE_HEAD_NEXT_POINTER_MASK;
 	dQH->next_dtd_ptr = cpu_to_le32(temp);
-
-	dma_sync_single_for_device(ep->udc->gadget.dev.parent,
-				   req->head->td_dma, sizeof(struct ep_td_struct),
-				   DMA_TO_DEVICE);
 
 	/* Clear active and halt bit */
 	temp = cpu_to_le32(~(EP_QUEUE_HEAD_STATUS_ACTIVE
@@ -1489,21 +1503,24 @@ static void tripwire_handler(struct fsl_udc *udc, u8 ep_num, u8 *buffer_ptr)
 }
 
 /* process-ep_req(): free the completed Tds for this req */
-static int process_ep_req(struct fsl_udc *udc, int pipe,
-		struct fsl_req *curr_req)
+static int process_ep_req(struct fsl_ep *ep, struct fsl_req *curr_req)
 {
 	struct ep_td_struct *curr_td;
 	int	td_complete, actual, remaining_length, j, tmp;
 	int	status = 0;
 	int	errors = 0;
-	struct  ep_queue_head *curr_qh = &udc->ep_qh[pipe];
-	int direction = pipe % 2;
+	struct  ep_queue_head *curr_qh = ep->qh;
 
 	curr_td = curr_req->head;
 	td_complete = 0;
 	actual = curr_req->req.length;
 
 	for (j = 0; j < curr_req->dtd_count; j++) {
+		dma_sync_single_for_cpu(ep->udc->gadget.dev.parent,
+					   curr_td->td_dma, sizeof(struct ep_td_struct),
+					   ep_is_in(ep)
+						? DMA_TO_DEVICE
+						: DMA_FROM_DEVICE);
 		remaining_length = (le32_to_cpu(curr_td->size_ioc_sts)
 					& DTD_PACKET_SIZE)
 				>> DTD_LENGTH_BIT_POS;
@@ -1512,7 +1529,7 @@ static int process_ep_req(struct fsl_udc *udc, int pipe,
 		if ((errors = le32_to_cpu(curr_td->size_ioc_sts) &
 						DTD_ERROR_MASK)) {
 			if (errors & DTD_STATUS_HALTED) {
-				ERR("dTD error %08x QH=%d\n", errors, pipe);
+				ERR("dTD error %08x QH=%d\n", errors, get_pipe_by_ep(ep));
 				/* Clear the errors and Halt condition */
 				tmp = le32_to_cpu(curr_qh->size_ioc_int_sts);
 				tmp &= ~errors;
@@ -1540,7 +1557,7 @@ static int process_ep_req(struct fsl_udc *udc, int pipe,
 			status = REQ_UNCOMPLETE;
 			return status;
 		} else if (remaining_length) {
-			if (direction) {
+			if (ep_is_in(ep)) {
 				VDBG("Transmit dTD remaining length not zero");
 				status = -EPROTO;
 				break;
@@ -1605,7 +1622,7 @@ static void dtd_complete_irq(struct fsl_udc *udc)
 		/* process the req queue until an uncomplete request */
 		list_for_each_entry_safe(curr_req, temp_req, &curr_ep->queue,
 				queue) {
-			status = process_ep_req(udc, i, curr_req);
+			status = process_ep_req(curr_ep, curr_req);
 
 			VDBG("status of process_ep_req= %d, ep = %d",
 					status, ep_num);
