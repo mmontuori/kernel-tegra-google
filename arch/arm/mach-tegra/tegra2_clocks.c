@@ -791,7 +791,7 @@ struct clk tegra_periph_clks[] = {
 	PERIPH_CLK("tvdac",     "tvdac",      NULL,   53, 0x194, mux_pllp_plld_pllc_clkm,        MUX | DIV_U71),
 	PERIPH_CLK("disp1",     "tegrafb.0",  NULL,   27, 0x138, mux_pllp_plld_pllc_clkm,        MUX | DIV_U71),
 	PERIPH_CLK("disp2",     "tegrafb.1",  NULL,   26, 0x13c, mux_pllp_plld_pllc_clkm,        MUX | DIV_U71),
-	PERIPH_CLK("usbd",      "usb.0",      NULL,   22, 0,     mux_clk_m,                              0),
+	PERIPH_CLK("usbd",      "fsl-tegra-udc",      NULL,   22, 0,     mux_clk_m,                    0),
 	PERIPH_CLK("usb2",      "usb.1",      NULL,   58, 0,     mux_clk_m,                              0),
 	PERIPH_CLK("usb3",      "usb.2",      NULL,   59, 0,     mux_clk_m,                              0),
 };
