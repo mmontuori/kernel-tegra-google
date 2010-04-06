@@ -19,11 +19,13 @@
 
 #include <linux/init.h>
 #include <linux/irq.h>
+#include <linux/interrupt.h>
 
 #include <linux/io.h>
 #include <linux/gpio.h>
 
 #include <mach/iomap.h>
+#include <mach/pinmux.h>
 
 #define GPIO_BANK(x)		((x) >> 5)
 #define GPIO_PORT(x)		(((x) >> 3) & 0x3)
@@ -55,6 +57,8 @@
 #define GPIO_INT_LVL_EDGE_BOTH		0x010100
 #define GPIO_INT_LVL_LEVEL_HIGH		0x000001
 #define GPIO_INT_LVL_LEVEL_LOW		0x000000
+
+extern int gpio_get_pinmux_group(int gpio_nr);
 
 struct tegra_gpio_bank {
 	int bank;
@@ -103,6 +107,35 @@ void tegra_gpio_disable(int gpio)
 	tegra_gpio_mask_write(GPIO_MSK_CNF(gpio), gpio, 0);
 }
 
+static void tegra_set_gpio_tristate(int gpio_nr, enum tegra_tristate ts)
+{
+	enum tegra_pingroup pg;
+	int err;
+
+	pg = gpio_get_pinmux_group(gpio_nr);
+	if (pg < 0)
+		return;
+
+	err = tegra_pinmux_set_tristate(pg, ts);
+	if (err < 0) {
+		pr_debug("%s: error %d pg %d ts %d\n", __func__, err, pg, ts);
+	}
+}
+
+static int tegra_gpio_request(struct gpio_chip *chip, unsigned offset)
+{
+	tegra_gpio_mask_write(GPIO_MSK_CNF(offset), offset, 1);
+	tegra_set_gpio_tristate(offset, TEGRA_TRI_NORMAL);
+	return 0;
+}
+
+static void tegra_gpio_free(struct gpio_chip *chip, unsigned offset)
+{
+	tegra_gpio_mask_write(GPIO_MSK_OUT(offset), offset, 0);
+	tegra_gpio_mask_write(GPIO_MSK_CNF(offset), offset, 0);
+	tegra_set_gpio_tristate(offset, TEGRA_TRI_TRISTATE);
+}
+
 static void tegra_gpio_set(struct gpio_chip *chip, unsigned offset, int value)
 {
 	tegra_gpio_mask_write(GPIO_MSK_OUT(offset), offset, value);
@@ -135,6 +168,8 @@ static struct gpio_chip tegra_gpio_chip = {
 	.get			= tegra_gpio_get,
 	.direction_output	= tegra_gpio_direction_output,
 	.set			= tegra_gpio_set,
+	.request		= tegra_gpio_request,
+	.free			= tegra_gpio_free,
 	.base			= 0,
 	.ngpio			= ARCH_NR_GPIOS,
 };
@@ -249,6 +284,13 @@ static void tegra_gpio_irq_handler(unsigned int irq, struct irq_desc *desc)
 
 }
 
+#ifdef CONFIG_PM
+static int tegra_gpio_wake_enable(unsigned int irq, unsigned int enable)
+{
+	struct tegra_gpio_bank *bank = get_irq_chip_data(irq);
+	return set_irq_wake(bank->irq, enable);
+}
+#endif
 
 static struct irq_chip tegra_gpio_irq_chip = {
 	.name		= "GPIO",
@@ -256,6 +298,9 @@ static struct irq_chip tegra_gpio_irq_chip = {
 	.mask		= tegra_gpio_irq_mask,
 	.unmask		= tegra_gpio_irq_unmask,
 	.set_type	= tegra_gpio_irq_set_type,
+#ifdef CONFIG_PM
+	.set_wake	= tegra_gpio_wake_enable,
+#endif
 };
 
 
