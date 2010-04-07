@@ -142,6 +142,18 @@ static inline void l2x0_inv_all(void)
 	_l2x0_unlock(&l2x0_lock, flags);
 }
 
+static inline void l2x0_flush_all(void)
+{
+	unsigned long flags;
+
+	/* flush all ways */
+	_l2x0_lock(&l2x0_lock, flags);
+	writel(0xff, l2x0_base + L2X0_CLEAN_INV_WAY);
+	cache_wait_always(l2x0_base + L2X0_CLEAN_INV_WAY, 0xff);
+	cache_sync();
+	_l2x0_unlock(&l2x0_lock, flags);
+}
+
 static void l2x0_inv_range(unsigned long start, unsigned long end)
 {
 	void __iomem *base = l2x0_base;
@@ -233,16 +245,43 @@ static void l2x0_flush_range(unsigned long start, unsigned long end)
 	_l2x0_unlock(&l2x0_lock, flags);
 }
 
-void __init l2x0_init(void __iomem *base, __u32 aux_val, __u32 aux_mask)
+static void l2x0_shutdown(void)
 {
-	__u32 aux;
+	unsigned long flags;
 
-	if (l2x0_disabled) {
-		printk(KERN_INFO "L2X0 cache controller disabled\n");
+	if (l2x0_disabled)
 		return;
+
+	BUG_ON(num_online_cpus() > 1);
+
+	local_irq_save(flags);
+
+	if (readl(l2x0_base + L2X0_CTRL) & 1) {
+		int m;
+		/* lockdown all ways, all masters to prevent new line
+		 * allocation during maintenance */
+		for (m=0; m<8; m++) {
+			writel(0xffff, l2x0_base + L2X0_LOCKDOWN_WAY_D + (m*8));
+			writel(0xffff, l2x0_base + L2X0_LOCKDOWN_WAY_I + (m*8));
+		}
+		l2x0_flush_all();
+		writel(0, l2x0_base + L2X0_CTRL);
+		/* unlock cache ways */
+		for (m=0; m<8; m++) {
+			writel(0, l2x0_base + L2X0_LOCKDOWN_WAY_D + (m*8));
+			writel(0, l2x0_base + L2X0_LOCKDOWN_WAY_I + (m*8));
+		}
 	}
 
-	l2x0_base = base;
+	local_irq_restore(flags);
+}
+
+static void l2x0_enable(__u32 aux_val, __u32 aux_mask)
+{
+	u32 aux;
+
+	if (l2x0_disabled)
+		return;
 
 	/*
 	 * Check if l2x0 controller is already enabled.
@@ -263,11 +302,30 @@ void __init l2x0_init(void __iomem *base, __u32 aux_val, __u32 aux_mask)
 		/* enable L2X0 */
 		writel(1, l2x0_base + L2X0_CTRL);
 	}
+}
+
+static void l2x0_restart(void)
+{
+	l2x0_enable(0, ~0ul);
+}
+
+void __init l2x0_init(void __iomem *base, __u32 aux_val, __u32 aux_mask)
+{
+	if (l2x0_disabled) {
+		pr_info(L2CC_TYPE " cache controller disabled\n");
+		return;
+	}
+
+	l2x0_base = base;
+
+	l2x0_enable(aux_val, aux_mask);
 
 	outer_cache.inv_range = l2x0_inv_range;
 	outer_cache.clean_range = l2x0_clean_range;
 	outer_cache.flush_range = l2x0_flush_range;
 	outer_cache.sync = l2x0_cache_sync;
+	outer_cache.shutdown = l2x0_shutdown;
+	outer_cache.restart = l2x0_restart;
 
 	pr_info(L2CC_TYPE " cache controller enabled\n");
 }
