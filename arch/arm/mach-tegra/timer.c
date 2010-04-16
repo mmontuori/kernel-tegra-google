@@ -63,7 +63,7 @@ static int tegra_timer_set_next_event(unsigned long cycles,
 {
 	u32 reg;
 
-	reg = 0x80000000 | ((1000000/HZ)*(cycles+1)-1);
+	reg = 0x80000000 | ((cycles > 1) ? (cycles-1) : 0);
 	timer_writel(reg, TIMER3_BASE + TIMER_PTV);
 
 	return 0;
@@ -176,7 +176,7 @@ static void __init tegra_init_timer(void)
 
 	tegra_clockevent.max_delta_ns =
 		clockevent_delta2ns(0x1fffffff, &tegra_clockevent);
-	tegra_clockevent.max_delta_ns =
+	tegra_clockevent.min_delta_ns =
 		clockevent_delta2ns(0x1, &tegra_clockevent);
 	tegra_clockevent.cpumask = cpu_all_mask;
 	tegra_clockevent.irq = tegra_timer_irq.irq;
