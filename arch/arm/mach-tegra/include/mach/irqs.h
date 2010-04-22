@@ -126,7 +126,7 @@
 #define INT_UARTD			(INT_TRI_BASE + 26)
 #define INT_UARTE			(INT_TRI_BASE + 27)
 #define INT_I2C3			(INT_TRI_BASE + 28)
-#define INT_SPI4			(INT_TRI_BASE + 29)
+#define INT_SPI_4			(INT_TRI_BASE + 29)
 #define INT_TRI_RES_30			(INT_TRI_BASE + 30)
 #define INT_SW_RESERVED			(INT_TRI_BASE + 31)
 
