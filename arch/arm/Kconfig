@@ -175,6 +175,9 @@ config ARM_L1_CACHE_SHIFT_6
 	help
 	  Setting ARM L1 cache line size to 64 Bytes.
 
+config ARCH_PROVIDES_UDELAY
+  bool
+
 if OPROFILE
 
 config OPROFILE_ARMV6
