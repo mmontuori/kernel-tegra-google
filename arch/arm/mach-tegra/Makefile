@@ -8,6 +8,7 @@ obj-y                                   += pinmux.o
 obj-y                                   += devices.o
 obj-y                                   += performance.o
 obj-y                                   += performance-bus.o
+obj-y                                   += delay.o
 obj-$(CONFIG_ARCH_TEGRA_2x_SOC)         += clock.o
 obj-$(CONFIG_ARCH_TEGRA_2x_SOC)         += tegra2_clocks.o
 obj-$(CONFIG_SMP)                       += platsmp.o localtimer.o headsmp.o
