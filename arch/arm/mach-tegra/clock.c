@@ -297,6 +297,18 @@ void tegra_clk_init_from_table(struct tegra_clk_init_table *table)
 }
 EXPORT_SYMBOL(tegra_clk_init_from_table);
 
+void tegra_periph_reset_deassert(struct clk *c)
+{
+	tegra2_periph_reset_deassert(c);
+}
+EXPORT_SYMBOL(tegra_periph_reset_deassert);
+
+void tegra_periph_reset_assert(struct clk *c)
+{
+	tegra2_periph_reset_assert(c);
+}
+EXPORT_SYMBOL(tegra_periph_reset_assert);
+
 int __init tegra_init_clock(void)
 {
 	tegra2_init_clocks();
