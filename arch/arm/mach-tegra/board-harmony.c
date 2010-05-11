@@ -39,6 +39,7 @@
 
 #include "board.h"
 #include "board-harmony.h"
+#include "clock.h"
 
 /* NVidia bootloader tags */
 #define ATAG_NVIDIA		0x41000801
@@ -293,6 +294,12 @@ static struct platform_device *harmony_devices[] __initdata = {
 	&pda_power_device,
 };
 
+static __initdata struct tegra_clk_init_table harmony_clk_init_table[] = {
+	/* name		parent		rate		enabled */
+	{ "uartd",	"pll_p",	216000000,	true},
+	{ NULL,		NULL,		0,		0},
+};
+
 static void __init tegra_harmony_fixup(struct machine_desc *desc, struct tag *tags,
 				 char **cmdline, struct meminfo *mi)
 {
@@ -311,15 +318,16 @@ static void __init tegra_harmony_init(void)
 
 	tegra_common_init();
 
-	clk = clk_get_sys(NULL, "pll_p");
-	clk_enable(clk);
-	clk_set_rate(clk, 216000000);
-
 	clk = clk_get_sys("uart.3", NULL);
 	clk_set_rate(clk, 216000000);
 	clk_enable(clk);
 
 	harmony_pinmux_init();
+
+	tegra_clk_init_from_table(harmony_clk_init_table);
+
+	clk = tegra_get_clock_by_name("uartd");
+	debug_uart_platform_data[0].uartclk = clk_get_rate(clk);
 
 	platform_add_devices(harmony_devices, ARRAY_SIZE(harmony_devices));
 }
