@@ -23,6 +23,7 @@
 #include <linux/spinlock.h>
 #include <linux/delay.h>
 #include <linux/io.h>
+#include <linux/hrtimer.h>
 
 #include <asm/clkdev.h>
 
@@ -77,7 +78,7 @@
 #define PLL_OUT_CLKEN			(1<<1)
 #define PLL_OUT_RESET_DISABLE		(1<<0)
 
-#define PLL_MISC			0xc
+#define PLL_MISC(c)			(((c)->flags & PLL_ALT_MISC_REG) ? 0x4 : 0xc)
 #define PLL_MISC_DCCON_SHIFT		20
 #define PLL_MISC_LOCK_ENABLE		(1<<18)
 #define PLL_MISC_CPCON_SHIFT		8
@@ -236,7 +237,6 @@ static void tegra2_super_clk_init(struct clk *c)
 	shift = ((val & SUPER_STATE_MASK) == SUPER_STATE_IDLE) ?
 		SUPER_IDLE_SOURCE_SHIFT : SUPER_RUN_SOURCE_SHIFT;
 	source = (val >> shift) & SUPER_SOURCE_MASK;
-	pr_info("%s %s %d\n", __func__, c->name, source);
 	for (sel = c->inputs; sel->input != NULL; sel++) {
 		if (sel->value == source)
 			break;
@@ -355,6 +355,22 @@ static unsigned long tegra2_pll_clk_recalculate_rate(struct clk* c)
 	return c->rate;
 }
 
+static int tegra2_pll_clk_wait_for_lock(struct clk *c)
+{
+	ktime_t before;
+
+	before = ktime_get();
+	while (!(clk_readl(c->reg + PLL_BASE) & PLL_BASE_LOCK)) {
+		if (ktime_us_delta(ktime_get(), before) > 5000) {
+			pr_err("Timed out waiting for lock bit on pll %s",
+				c->name);
+			return -1;
+		}
+	}
+
+	return 0;
+}
+
 static void tegra2_pll_clk_init(struct clk *c)
 {
 	u32 val = clk_readl(c->reg + PLL_BASE);
@@ -376,50 +392,11 @@ static void tegra2_pll_clk_init(struct clk *c)
 		c->p = (val & PLL_BASE_DIVP_MASK) ? 2 : 1;
 	}
 
-	val = clk_readl(c->reg + PLL_MISC);
+	val = clk_readl(c->reg + PLL_MISC(c));
 	if (c->flags & PLL_HAS_CPCON)
 		c->cpcon = (val & PLL_MISC_CPCON_MASK) >> PLL_MISC_CPCON_SHIFT;
 
 	tegra2_pll_clk_recalculate_rate(c);
-}
-
-static int tegra2_pll_clk_set_rate(struct clk *c, unsigned long rate)
-{
-	u32 val;
-	unsigned long input_rate;
-	const struct clk_pll_table *sel;
-
-	pr_debug("%s: %s %lu\n", __func__, c->name, rate);
-	/* BUG_ON(c->refcnt != 0); */
-
-	input_rate = c->parent->rate;
-	for (sel = c->pll_table; sel->input_rate != 0; sel++) {
-		if (sel->input_rate == input_rate && sel->output_rate == rate) {
-			c->n = sel->n;
-			c->m = sel->m;
-			c->p = sel->p;
-			c->cpcon = sel->cpcon;
-			val = clk_readl(c->reg + PLL_BASE);
-			if (c->flags & PLL_FIXED)
-				val |= PLL_BASE_OVERRIDE;
-			val &= ~(PLL_BASE_DIVP_MASK | PLL_BASE_DIVN_MASK |
-				 PLL_BASE_DIVM_MASK);
-			val |= (c->m << PLL_BASE_DIVM_SHIFT) |
-				(c->n << PLL_BASE_DIVN_SHIFT);
-			BUG_ON(c->p > 2);
-			if (c->p == 2)
-				val |= 1 << PLL_BASE_DIVP_SHIFT;
-			clk_writel(val, c->reg + PLL_BASE);
-			c->rate = rate;
-
-			if (c->flags & PLL_HAS_CPCON) {
-				val = c->cpcon << PLL_MISC_CPCON_SHIFT;
-				clk_writel(val, c->reg + PLL_MISC);
-			}
-			return 0;
-		}
-	}
-	return -EINVAL;
 }
 
 static int tegra2_pll_clk_enable(struct clk *c)
@@ -431,6 +408,13 @@ static int tegra2_pll_clk_enable(struct clk *c)
 	val &= ~PLL_BASE_BYPASS;
 	val |= PLL_BASE_ENABLE;
 	clk_writel(val, c->reg + PLL_BASE);
+
+	val = clk_readl(c->reg + PLL_MISC(c));
+	val |= PLL_MISC_LOCK_ENABLE;
+	clk_writel(val, c->reg + PLL_MISC(c));
+
+	tegra2_pll_clk_wait_for_lock(c);
+
 	return 0;
 }
 
@@ -442,6 +426,51 @@ static void tegra2_pll_clk_disable(struct clk *c)
 	val = clk_readl(c->reg);
 	val &= ~(PLL_BASE_BYPASS | PLL_BASE_ENABLE);
 	clk_writel(val, c->reg);
+}
+
+static int tegra2_pll_clk_set_rate(struct clk *c, unsigned long rate)
+{
+	u32 val;
+	unsigned long input_rate;
+	const struct clk_pll_table *sel;
+
+	pr_debug("%s: %s %lu\n", __func__, c->name, rate);
+	BUG_ON(c->refcnt != 0);
+
+	input_rate = c->parent->rate;
+	for (sel = c->pll_table; sel->input_rate != 0; sel++) {
+		if (sel->input_rate == input_rate && sel->output_rate == rate) {
+			c->n = sel->n;
+			c->m = sel->m;
+			c->p = sel->p;
+			c->cpcon = sel->cpcon;
+
+			val = clk_readl(c->reg + PLL_BASE);
+			if (c->flags & PLL_FIXED)
+				val |= PLL_BASE_OVERRIDE;
+			val &= ~(PLL_BASE_DIVP_MASK | PLL_BASE_DIVN_MASK |
+				 PLL_BASE_DIVM_MASK);
+			val |= (c->m << PLL_BASE_DIVM_SHIFT) |
+				(c->n << PLL_BASE_DIVN_SHIFT);
+			BUG_ON(c->p > 2);
+			if (c->p == 2)
+				val |= 1 << PLL_BASE_DIVP_SHIFT;
+			clk_writel(val, c->reg + PLL_BASE);
+
+			if (c->flags & PLL_HAS_CPCON) {
+				val = c->cpcon << PLL_MISC_CPCON_SHIFT;
+				val |= PLL_MISC_LOCK_ENABLE;
+				clk_writel(val, c->reg + PLL_MISC(c));
+			}
+
+			if (c->state == ON)
+				tegra2_pll_clk_enable(c);
+
+			c->rate = rate;
+			return 0;
+		}
+	}
+	return -EINVAL;
 }
 
 static struct clk_ops tegra_pll_ops = {
@@ -708,7 +737,7 @@ static struct clk_ops tegra_clk_double_ops = {
 
 /* Clock definitions */
 static struct clk tegra_clk_32k = {
-	.name = "tegra_clk_32k",
+	.name = "clk_32k",
 	.rate = 32678,
 	.ops  = NULL,
 };
@@ -722,12 +751,13 @@ static struct clk_pll_table tegra_pll_s_table[] = {
 };
 
 static struct clk tegra_pll_s = {
-	.name = "tegra_pll_s",
-	.ops = &tegra_pll_ops,
+	.name      = "pll_s",
+	.flags     = PLL_ALT_MISC_REG,
+	.ops       = &tegra_pll_ops,
 	.reg       = 0xf0,
 	.input_min = 32768,
 	.input_max = 32768,
-	.parent     = &tegra_clk_32k,
+	.parent    = &tegra_clk_32k,
 	.cf_min    = 0, /* FIXME */
 	.cf_max    = 0, /* FIXME */
 	.vco_min   = 12000000,
@@ -741,7 +771,7 @@ static struct clk_mux_sel tegra_clk_m_sel[] = {
 	{ 0, 0},
 };
 static struct clk tegra_clk_m = {
-	.name      = "tegra_clk_m",
+	.name      = "clk_m",
 	.flags     = ENABLE_ON_INIT,
 	.ops       = &tegra_clk_m_ops,
 	.inputs    = tegra_clk_m_sel,
@@ -755,7 +785,7 @@ static struct clk_pll_table tegra_pll_c_table[] = {
 };
 
 static struct clk tegra_pll_c = {
-	.name      = "tegra_pll_c",
+	.name      = "pll_c",
 	.flags	   = PLL_HAS_CPCON,
 	.ops       = &tegra_pll_ops,
 	.reg       = 0x80,
@@ -770,7 +800,7 @@ static struct clk tegra_pll_c = {
 };
 
 static struct clk tegra_pll_c_out1 = {
-	.name      = "tegra_pll_c_out1",
+	.name      = "pll_c_out1",
 	.ops       = &tegra_pll_div_ops,
 	.flags     = DIV_U71,
 	.parent    = &tegra_pll_c,
@@ -783,7 +813,7 @@ static struct clk_pll_table tegra_pll_m_table[] = {
 };
 
 static struct clk tegra_pll_m = {
-	.name      = "tegra_pll_m",
+	.name      = "pll_m",
 	.flags     = PLL_HAS_CPCON,
 	.ops       = &tegra_pll_ops,
 	.reg       = 0x90,
@@ -798,7 +828,7 @@ static struct clk tegra_pll_m = {
 };
 
 static struct clk tegra_pll_m_out1 = {
-	.name      = "tegra_pll_m_out1",
+	.name      = "pll_m_out1",
 	.ops       = &tegra_pll_div_ops,
 	.flags     = DIV_U71,
 	.parent    = &tegra_pll_m,
@@ -819,7 +849,7 @@ static struct clk_pll_table tegra_pll_p_table[] = {
 };
 
 static struct clk tegra_pll_p = {
-	.name      = "tegra_pll_p",
+	.name      = "pll_p",
 	.flags     = ENABLE_ON_INIT | PLL_FIXED | PLL_HAS_CPCON,
 	.ops       = &tegra_pll_ops,
 	.reg       = 0xa0,
@@ -834,7 +864,7 @@ static struct clk tegra_pll_p = {
 };
 
 static struct clk tegra_pll_p_out1 = {
-	.name      = "tegra_pll_p_out1",
+	.name      = "pll_p_out1",
 	.ops       = &tegra_pll_div_ops,
 	.flags     = ENABLE_ON_INIT | DIV_U71 | DIV_U71_FIXED,
 	.parent    = &tegra_pll_p,
@@ -843,7 +873,7 @@ static struct clk tegra_pll_p_out1 = {
 };
 
 static struct clk tegra_pll_p_out2 = {
-	.name      = "tegra_pll_p_out2",
+	.name      = "pll_p_out2",
 	.ops       = &tegra_pll_div_ops,
 	.flags     = ENABLE_ON_INIT | DIV_U71 | DIV_U71_FIXED,
 	.parent    = &tegra_pll_p,
@@ -852,7 +882,7 @@ static struct clk tegra_pll_p_out2 = {
 };
 
 static struct clk tegra_pll_p_out3 = {
-	.name      = "tegra_pll_p_out3",
+	.name      = "pll_p_out3",
 	.ops       = &tegra_pll_div_ops,
 	.flags     = ENABLE_ON_INIT | DIV_U71 | DIV_U71_FIXED,
 	.parent    = &tegra_pll_p,
@@ -861,7 +891,7 @@ static struct clk tegra_pll_p_out3 = {
 };
 
 static struct clk tegra_pll_p_out4 = {
-	.name      = "tegra_pll_p_out4",
+	.name      = "pll_p_out4",
 	.ops       = &tegra_pll_div_ops,
 	.flags     = ENABLE_ON_INIT | DIV_U71 | DIV_U71_FIXED,
 	.parent    = &tegra_pll_p,
@@ -878,7 +908,7 @@ static struct clk_pll_table tegra_pll_a_table[] = {
 };
 
 static struct clk tegra_pll_a = {
-	.name      = "tegra_pll_a",
+	.name      = "pll_a",
 	.flags     = PLL_HAS_CPCON,
 	.ops       = &tegra_pll_ops,
 	.reg       = 0xb0,
@@ -893,7 +923,7 @@ static struct clk tegra_pll_a = {
 };
 
 static struct clk tegra_pll_a_out0 = {
-	.name      = "tegra_pll_a_out0",
+	.name      = "pll_a_out0",
 	.ops       = &tegra_pll_div_ops,
 	.flags     = DIV_U71,
 	.parent    = &tegra_pll_a,
@@ -910,7 +940,7 @@ static struct clk_pll_table tegra_pll_d_table[] = {
 };
 
 static struct clk tegra_pll_d = {
-	.name      = "tegra_pll_d",
+	.name      = "pll_d",
 	.flags     = PLL_HAS_CPCON | PLLD,
 	.ops       = &tegra_pll_ops,
 	.reg       = 0xd0,
@@ -925,7 +955,7 @@ static struct clk tegra_pll_d = {
 };
 
 static struct clk tegra_pll_d_out0 = {
-	.name      = "tegra_pll_d_out0",
+	.name      = "pll_d_out0",
 	.ops       = &tegra_pll_div_ops,
 	.flags     = DIV_2 | PLLD,
 	.parent    = &tegra_pll_d,
@@ -940,7 +970,7 @@ static struct clk_pll_table tegra_pll_u_table[] = {
 };
 
 static struct clk tegra_pll_u = {
-	.name      = "tegra_pll_u",
+	.name      = "pll_u",
 	.flags     = 0,
 	.ops       = &tegra_pll_ops,
 	.reg       = 0xc0,
@@ -967,8 +997,8 @@ static struct clk_pll_table tegra_pll_x_table[] = {
 };
 
 static struct clk tegra_pll_x = {
-	.name      = "tegra_pll_x",
-	.flags     = PLL_HAS_CPCON,
+	.name      = "pll_x",
+	.flags     = PLL_HAS_CPCON | PLL_ALT_MISC_REG,
 	.ops       = &tegra_pll_ops,
 	.reg       = 0xe0,
 	.input_min = 2000000,
@@ -982,7 +1012,7 @@ static struct clk tegra_pll_x = {
 };
 
 static struct clk tegra_clk_d = {
-	.name      = "tegra_clk_d",
+	.name      = "clk_d",
 	.flags     = PERIPH_NO_RESET,
 	.ops       = &tegra_clk_double_ops,
 	.clk_num   = 90,
@@ -993,7 +1023,7 @@ static struct clk tegra_clk_d = {
 
 /* FIXME: need tegra_audio
 static struct clk tegra_clk_audio_2x = {
-	.name      = "tegra_clk_d",
+	.name      = "clk_d",
 	.flags     = PERIPH_NO_RESET,
 	.ops       = &tegra_clk_double_ops,
 	.clk_num   = 89,
@@ -1267,7 +1297,7 @@ struct clk_lookup tegra_clk_lookups[] = {
 	CLK(NULL, "clk_d", 	&tegra_clk_d),
 };
 
-void tegra2_init_clocks(void)
+void __init tegra2_init_clocks(void)
 {
 	int i;
 	struct clk_lookup *cl;
@@ -1291,7 +1321,7 @@ void tegra2_init_clocks(void)
 
 	for (i = 0; i < ARRAY_SIZE(tegra_clk_duplicates); i++) {
 		cd = &tegra_clk_duplicates[i];
-		c = get_tegra_clock_by_name(cd->name);
+		c = tegra_get_clock_by_name(cd->name);
 		if (c) {
 			cl = &cd->lookup;
 			cl->clk = c;

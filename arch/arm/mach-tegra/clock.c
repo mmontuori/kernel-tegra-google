@@ -32,7 +32,7 @@ static LIST_HEAD(clocks);
 
 static DEFINE_SPINLOCK(clock_lock);
 
-struct clk *get_tegra_clock_by_name(const char *name)
+struct clk *tegra_get_clock_by_name(const char *name)
 {
 	struct clk *c;
 	struct clk *ret = NULL;
@@ -234,6 +234,68 @@ unsigned long clk_get_rate(struct clk *c)
 	return ret;
 }
 EXPORT_SYMBOL(clk_get_rate);
+
+static int tegra_clk_init_one_from_table(struct tegra_clk_init_table *table)
+{
+	struct clk *c;
+	struct clk *p;
+
+	int ret = 0;
+
+	c = tegra_get_clock_by_name(table->name);
+
+	if (!c) {
+		pr_warning("Unable to initialize clock %s\n",
+			table->name);
+		return -ENODEV;
+	}
+
+	if (table->parent) {
+		p = tegra_get_clock_by_name(table->parent);
+		if (!p) {
+			pr_warning("Unable to find parent %s of clock %s\n",
+				table->parent, table->name);
+			return -ENODEV;
+		}
+
+		if (c->parent != p) {
+			ret = clk_set_parent(c, p);
+			if (ret) {
+				pr_warning("Unable to set parent %s of clock %s: %d\n",
+					table->parent, table->name, ret);
+				return -EINVAL;
+			}
+		}
+	}
+
+	if (table->rate && table->rate != clk_get_rate(c)) {
+		ret = clk_set_rate(c, table->rate);
+		if (ret) {
+			pr_warning("Unable to set clock %s to rate %lu: %d\n",
+				table->name, table->rate, ret);
+			return -EINVAL;
+		}
+	}
+
+	if (table->enabled) {
+		ret = clk_enable(c);
+		if (ret) {
+			pr_warning("Unable to enable clock %s: %d\n",
+				table->name, ret);
+			return -EINVAL;
+		}
+	}
+
+	return 0;
+}
+
+void tegra_clk_init_from_table(struct tegra_clk_init_table *table)
+{
+	for (; table->name; table++) {
+		tegra_clk_init_one_from_table(table);
+	}
+}
+EXPORT_SYMBOL(tegra_clk_init_from_table);
 
 int __init tegra_init_clock(void)
 {

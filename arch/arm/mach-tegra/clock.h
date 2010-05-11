@@ -33,7 +33,10 @@
 #define PERIPH_NO_RESET	0x00000100
 #define PERIPH_NO_ENB	0x00000200
 #define PERIPH_EMC_ENB	0x00000400
+#define PLL_ALT_MISC_REG 0x00000800
 #define ENABLE_ON_INIT	0x10000000
+
+
 struct clk;
 
 struct clk_mux_sel {
@@ -121,13 +124,21 @@ struct clk_duplicate {
 	struct clk_lookup lookup;
 };
 
+struct tegra_clk_init_table {
+	const char *name;
+	const char *parent;
+	unsigned long rate;
+	bool enabled;
+};
+
 void tegra2_init_clocks(void);
 void clk_init(struct clk *clk);
-struct clk *get_tegra_clock_by_name(const char *name);
+struct clk *tegra_get_clock_by_name(const char *name);
 unsigned long clk_measure_input_freq(void);
 void clk_disable_locked(struct clk *c);
 int clk_enable_locked(struct clk *c);
 int clk_set_parent_locked(struct clk *c, struct clk *parent);
 int clk_reparent(struct clk *c, struct clk *parent);
+void tegra_clk_init_from_table(struct tegra_clk_init_table *table);
 
 #endif
