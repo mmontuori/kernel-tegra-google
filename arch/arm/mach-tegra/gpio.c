@@ -169,7 +169,7 @@ static int tegra_gpio_irq_set_type(unsigned int irq, unsigned int type)
 	int val;
 	unsigned long flags;
 
-	switch (type) {
+	switch (type & IRQ_TYPE_SENSE_MASK) {
 	case IRQ_TYPE_EDGE_RISING:
 		lvl_type = GPIO_INT_LVL_EDGE_RISING;
 		break;
