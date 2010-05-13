@@ -1175,6 +1175,11 @@ static struct clk_mux_sel mux_pllp_out3[] = {
 	{ 0, 0},
 };
 
+static struct clk_mux_sel mux_plld[] = {
+	{ .input = &tegra_pll_d, .value = 0},
+	{ 0, 0},
+};
+
 static struct clk_mux_sel mux_clk_32k[] = {
 	{ .input = &tegra_clk_32k, .value = 0},
 	{ 0, 0},
@@ -1257,6 +1262,7 @@ struct clk tegra_periph_clks[] = {
 	PERIPH_CLK("usb2",      "usb.1",      NULL,   58, 0,     mux_clk_m,                              0),
 	PERIPH_CLK("usb3",      "usb.2",      NULL,   59, 0,     mux_clk_m,                              0),
 	PERIPH_CLK("emc",       "emc",        NULL,   57, 0x19c, mux_pllm_pllc_pllp_clkm,        MUX | DIV_U71 | PERIPH_EMC_ENB),
+	PERIPH_CLK("dsi",       "dsi",        NULL,   48, 0, mux_plld, 0),
 };
 
 #define CLK_DUPLICATE(_name, _dev, _con) \
