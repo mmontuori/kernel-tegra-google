@@ -330,6 +330,9 @@ static void __init tegra_harmony_init(void)
 	debug_uart_platform_data[0].uartclk = clk_get_rate(clk);
 
 	platform_add_devices(harmony_devices, ARRAY_SIZE(harmony_devices));
+
+	harmony_panel_init();
+	harmony_sdhci_init();
 }
 
 MACHINE_START(HARMONY, "harmony")

@@ -145,12 +145,9 @@ static struct platform_device tegra_sdhci_device4 = {
 	},
 };
 
-static int __init harmony_init_sdhci(void)
+int __init harmony_sdhci_init(void)
 {
 	int ret;
-
-	if (!machine_is_harmony())
-		return 0;
 
 	tegra_pinmux_set_tristate(TEGRA_PINGROUP_DTA, TEGRA_TRI_NORMAL);
 	tegra_pinmux_set_tristate(TEGRA_PINGROUP_DTB, TEGRA_TRI_NORMAL);
@@ -181,6 +178,9 @@ static int __init harmony_init_sdhci(void)
 
 	/*ret = platform_device_register(&tegra_sdhci_device1);*/
 	ret = platform_device_register(&tegra_sdhci_device2);
+	if (ret != 0)
+		return ret;
+
 	/*ret = platform_device_register(&tegra_sdhci_device3);*/
 	ret = platform_device_register(&tegra_sdhci_device4);
 	if (ret != 0)
@@ -188,6 +188,3 @@ static int __init harmony_init_sdhci(void)
 
 	return 0;
 }
-
-device_initcall(harmony_init_sdhci);
-

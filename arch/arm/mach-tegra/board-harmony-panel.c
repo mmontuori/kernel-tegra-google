@@ -58,18 +58,11 @@ static struct platform_device tegra_fb_device = {
 	},
 };
 
-static int __init harmony_init_panel(void) {
+int __init harmony_panel_init(void) {
 	int ret;
 
-	if (!machine_is_harmony())
-		return 0;
-
 	ret = platform_device_register(&tegra_fb_device);
-	if (ret != 0)
-		return ret;
 
-	return 0;
+	return ret;
 }
-
-device_initcall(harmony_init_panel);
 
