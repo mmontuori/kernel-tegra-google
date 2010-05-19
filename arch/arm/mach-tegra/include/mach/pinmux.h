@@ -226,6 +226,111 @@ struct tegra_pingroup_config {
 	tegra_tristate_t	tristate;
 };
 
+typedef enum {
+	TEGRA_SLEW_FASTEST = 0,
+	TEGRA_SLEW_FAST,
+	TEGRA_SLEW_SLOW,
+	TEGRA_SLEW_SLOWEST,
+	TEGRA_MAX_SLEW,
+} tegra_slew_t;
+
+typedef enum {
+	TEGRA_PULL_0 = 0,
+	TEGRA_PULL_1,
+	TEGRA_PULL_2,
+	TEGRA_PULL_3,
+	TEGRA_PULL_4,
+	TEGRA_PULL_5,
+	TEGRA_PULL_6,
+	TEGRA_PULL_7,
+	TEGRA_PULL_8,
+	TEGRA_PULL_9,
+	TEGRA_PULL_10,
+	TEGRA_PULL_11,
+	TEGRA_PULL_12,
+	TEGRA_PULL_13,
+	TEGRA_PULL_14,
+	TEGRA_PULL_15,
+	TEGRA_PULL_16,
+	TEGRA_PULL_17,
+	TEGRA_PULL_18,
+	TEGRA_PULL_19,
+	TEGRA_PULL_20,
+	TEGRA_PULL_21,
+	TEGRA_PULL_22,
+	TEGRA_PULL_23,
+	TEGRA_PULL_24,
+	TEGRA_PULL_25,
+	TEGRA_PULL_26,
+	TEGRA_PULL_27,
+	TEGRA_PULL_28,
+	TEGRA_PULL_29,
+	TEGRA_PULL_30,
+	TEGRA_PULL_31,
+	TEGRA_MAX_PULL,
+} tegra_pull_strength_t;
+
+typedef enum {
+	TEGRA_DRIVE_PINGROUP_AO1 = 0,
+	TEGRA_DRIVE_PINGROUP_AO2,
+	TEGRA_DRIVE_PINGROUP_AT1,
+	TEGRA_DRIVE_PINGROUP_AT2,
+	TEGRA_DRIVE_PINGROUP_CDEV1,
+	TEGRA_DRIVE_PINGROUP_CDEV2,
+	TEGRA_DRIVE_PINGROUP_CSUS,
+	TEGRA_DRIVE_PINGROUP_DAP1,
+	TEGRA_DRIVE_PINGROUP_DAP2,
+	TEGRA_DRIVE_PINGROUP_DAP3,
+	TEGRA_DRIVE_PINGROUP_DAP4,
+	TEGRA_DRIVE_PINGROUP_DBG,
+	TEGRA_DRIVE_PINGROUP_LCD1,
+	TEGRA_DRIVE_PINGROUP_LCD2,
+	TEGRA_DRIVE_PINGROUP_SDMMC2,
+	TEGRA_DRIVE_PINGROUP_SDMMC3,
+	TEGRA_DRIVE_PINGROUP_SPI,
+	TEGRA_DRIVE_PINGROUP_UAA,
+	TEGRA_DRIVE_PINGROUP_UAB,
+	TEGRA_DRIVE_PINGROUP_UART2,
+	TEGRA_DRIVE_PINGROUP_UART3,
+	TEGRA_DRIVE_PINGROUP_VI1,
+	TEGRA_DRIVE_PINGROUP_VI2,
+	TEGRA_DRIVE_PINGROUP_XM2A,
+	TEGRA_DRIVE_PINGROUP_XM2C,
+	TEGRA_DRIVE_PINGROUP_XM2D,
+	TEGRA_DRIVE_PINGROUP_XM2CLK,
+	TEGRA_DRIVE_PINGROUP_MEMCOMP,
+	TEGRA_MAX_DRIVE_PINGROUP,
+} tegra_drive_pingroup_t;
+
+typedef enum {
+	TEGRA_DRIVE_DIV_8 = 0,
+	TEGRA_DRIVE_DIV_4,
+	TEGRA_DRIVE_DIV_2,
+	TEGRA_DRIVE_DIV_1,
+	TEGRA_MAX_DRIVE,
+} tegra_drive_t;
+
+typedef enum {
+	TEGRA_HSM_DISABLE = 0,
+	TEGRA_HSM_ENABLE,
+} tegra_hsm_t;
+
+typedef enum {
+	TEGRA_SCHMITT_DISABLE = 0,
+	TEGRA_SCHMITT_ENABLE,
+} tegra_schmitt_t;
+
+struct tegra_drive_pingroup_config {
+	tegra_drive_pingroup_t pingroup;
+	tegra_hsm_t hsm;
+	tegra_schmitt_t schmitt;
+	tegra_drive_t drive;
+	tegra_pull_strength_t pull_down;
+	tegra_pull_strength_t pull_up;
+	tegra_slew_t slew_rising;
+	tegra_slew_t slew_falling;
+};
+
 int tegra_pinmux_set_func(tegra_pingroup_t pg, tegra_mux_func_t func);
 int tegra_pinmux_set_tristate(tegra_pingroup_t pg, tegra_tristate_t tristate);
 int tegra_pinmux_set_pullupdown(tegra_pingroup_t pg, tegra_pullupdown_t pupd);
@@ -236,6 +341,9 @@ void tegra_pinmux_config_pingroup(tegra_pingroup_t pingroup,
 				  tegra_tristate_t tristate);
 
 void tegra_pinmux_config_table(struct tegra_pingroup_config *config, int len);
+
+void tegra_drive_pinmux_config_table(struct tegra_drive_pingroup_config *config,
+	int len);
 
 #endif
 
