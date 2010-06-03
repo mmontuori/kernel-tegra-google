@@ -9,6 +9,7 @@ obj-y                                   += devices.o
 obj-y                                   += delay.o
 obj-y                                   += powergate.o
 obj-$(CONFIG_FIQ)                       += fiq.o fiq_glue.o
+obj-$(CONFIG_TEGRA_FIQ_DEBUGGER)        += tegra_fiq_debugger.o
 obj-$(CONFIG_ARCH_TEGRA_2x_SOC)         += clock.o
 obj-$(CONFIG_ARCH_TEGRA_2x_SOC)         += tegra2_clocks.o
 obj-$(CONFIG_SMP)                       += platsmp.o localtimer.o headsmp.o
