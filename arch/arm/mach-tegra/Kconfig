@@ -57,4 +57,11 @@ config TEGRA_SYSTEM_DMA
 	  Adds system DMA functionality for NVIDIA Tegra SoCs, used by
 	  several Tegra device drivers
 
+config TEGRA_FIQ_DEBUGGER
+	bool "Enable the FIQ serial debugger on Tegra"
+	default y
+	select FIQ_DEBUGGER
+	help
+	  Enables the FIQ serial debugger on Tegra"
+
 endif
