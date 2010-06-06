@@ -17,7 +17,7 @@
 #ifndef __MACH_TEGRA_PINMUX_H
 #define __MACH_TEGRA_PINMUX_H
 
-typedef enum {
+enum tegra_pingroup {
 	TEGRA_PINGROUP_ATA = 0,
 	TEGRA_PINGROUP_ATB,
 	TEGRA_PINGROUP_ATC,
@@ -136,9 +136,9 @@ typedef enum {
 	TEGRA_PINGROUP_XM2C,
 	TEGRA_PINGROUP_XM2D,
 	TEGRA_MAX_PINGROUP,
-} tegra_pingroup_t;
+};
 
-typedef enum {
+enum tegra_mux_func {
 	TEGRA_MUX_RSVD = 0x8000,
 	TEGRA_MUX_RSVD1 = 0x8000,
 	TEGRA_MUX_RSVD2 = 0x8001,
@@ -206,35 +206,35 @@ typedef enum {
 	TEGRA_MUX_VI_SENSOR_CLK,
 	TEGRA_MUX_XIO,
 	TEGRA_MAX_MUX,
-} tegra_mux_func_t;
+};
 
-typedef enum {
+enum tegra_pullupdown {
 	TEGRA_PUPD_NORMAL = 0,
 	TEGRA_PUPD_PULL_DOWN,
 	TEGRA_PUPD_PULL_UP,
-} tegra_pullupdown_t;
-
-typedef enum {
-	TEGRA_TRI_NORMAL = 0,
-	TEGRA_TRI_TRISTATE = 1,
-} tegra_tristate_t;
-
-struct tegra_pingroup_config {
-	tegra_pingroup_t	pingroup;
-	tegra_mux_func_t	func;
-	tegra_pullupdown_t	pupd;
-	tegra_tristate_t	tristate;
 };
 
-typedef enum {
+enum tegra_tristate {
+	TEGRA_TRI_NORMAL = 0,
+	TEGRA_TRI_TRISTATE = 1,
+};
+
+struct tegra_pingroup_config {
+	enum tegra_pingroup	pingroup;
+	enum tegra_mux_func	func;
+	enum tegra_pullupdown	pupd;
+	enum tegra_tristate	tristate;
+};
+
+enum tegra_slew {
 	TEGRA_SLEW_FASTEST = 0,
 	TEGRA_SLEW_FAST,
 	TEGRA_SLEW_SLOW,
 	TEGRA_SLEW_SLOWEST,
 	TEGRA_MAX_SLEW,
-} tegra_slew_t;
+};
 
-typedef enum {
+enum tegra_pull_strength {
 	TEGRA_PULL_0 = 0,
 	TEGRA_PULL_1,
 	TEGRA_PULL_2,
@@ -268,9 +268,9 @@ typedef enum {
 	TEGRA_PULL_30,
 	TEGRA_PULL_31,
 	TEGRA_MAX_PULL,
-} tegra_pull_strength_t;
+};
 
-typedef enum {
+enum tegra_drive_pingroup {
 	TEGRA_DRIVE_PINGROUP_AO1 = 0,
 	TEGRA_DRIVE_PINGROUP_AO2,
 	TEGRA_DRIVE_PINGROUP_AT1,
@@ -300,45 +300,44 @@ typedef enum {
 	TEGRA_DRIVE_PINGROUP_XM2CLK,
 	TEGRA_DRIVE_PINGROUP_MEMCOMP,
 	TEGRA_MAX_DRIVE_PINGROUP,
-} tegra_drive_pingroup_t;
+};
 
-typedef enum {
+enum tegra_drive {
 	TEGRA_DRIVE_DIV_8 = 0,
 	TEGRA_DRIVE_DIV_4,
 	TEGRA_DRIVE_DIV_2,
 	TEGRA_DRIVE_DIV_1,
 	TEGRA_MAX_DRIVE,
-} tegra_drive_t;
-
-typedef enum {
-	TEGRA_HSM_DISABLE = 0,
-	TEGRA_HSM_ENABLE,
-} tegra_hsm_t;
-
-typedef enum {
-	TEGRA_SCHMITT_DISABLE = 0,
-	TEGRA_SCHMITT_ENABLE,
-} tegra_schmitt_t;
-
-struct tegra_drive_pingroup_config {
-	tegra_drive_pingroup_t pingroup;
-	tegra_hsm_t hsm;
-	tegra_schmitt_t schmitt;
-	tegra_drive_t drive;
-	tegra_pull_strength_t pull_down;
-	tegra_pull_strength_t pull_up;
-	tegra_slew_t slew_rising;
-	tegra_slew_t slew_falling;
 };
 
-int tegra_pinmux_set_func(tegra_pingroup_t pg, tegra_mux_func_t func);
-int tegra_pinmux_set_tristate(tegra_pingroup_t pg, tegra_tristate_t tristate);
-int tegra_pinmux_set_pullupdown(tegra_pingroup_t pg, tegra_pullupdown_t pupd);
+enum tegra_hsm {
+	TEGRA_HSM_DISABLE = 0,
+	TEGRA_HSM_ENABLE,
+};
 
-void tegra_pinmux_config_pingroup(tegra_pingroup_t pingroup,
-				  tegra_mux_func_t func,
-				  tegra_pullupdown_t pupd,
-				  tegra_tristate_t tristate);
+enum tegra_schmitt {
+	TEGRA_SCHMITT_DISABLE = 0,
+	TEGRA_SCHMITT_ENABLE,
+};
+
+struct tegra_drive_pingroup_config {
+	enum tegra_drive_pingroup pingroup;
+	enum tegra_hsm hsm;
+	enum tegra_schmitt schmitt;
+	enum tegra_drive drive;
+	enum tegra_pull_strength pull_down;
+	enum tegra_pull_strength pull_up;
+	enum tegra_slew slew_rising;
+	enum tegra_slew slew_falling;
+};
+
+int tegra_pinmux_set_func(enum tegra_pingroup pg, enum tegra_mux_func func);
+int tegra_pinmux_set_tristate(enum tegra_pingroup pg, enum tegra_tristate tristate);
+int tegra_pinmux_set_pullupdown(enum tegra_pingroup pg, enum tegra_pullupdown pupd);
+
+void tegra_pinmux_config_pingroup(enum tegra_pingroup pingroup,
+	enum tegra_mux_func func, enum tegra_pullupdown pupd,
+	enum tegra_tristate tristate);
 
 void tegra_pinmux_config_table(struct tegra_pingroup_config *config, int len);
 

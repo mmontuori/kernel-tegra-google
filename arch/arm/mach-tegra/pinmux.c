@@ -49,12 +49,12 @@
 struct tegra_pingroup_desc {
 	const char *name;
 	int funcs[4];
-	s8 tri_reg; 		/* offset into the TRISTATE_REG_* register bank */
-	s8 tri_bit; 		/* offset into the TRISTATE_REG_* register bit */
-	s8 mux_reg;		/* offset into the PIN_MUX_CTL_* register bank */
-	s8 mux_bit;		/* offset into the PIN_MUX_CTL_* register bit */
-	s8 pupd_reg;		/* offset into the PULL_UPDOWN_REG_* register bank */
-	s8 pupd_bit;		/* offset into the PULL_UPDOWN_REG_* register bit */
+	s8 tri_reg; 	/* offset into the TRISTATE_REG_* register bank */
+	s8 tri_bit; 	/* offset into the TRISTATE_REG_* register bit */
+	s8 mux_reg;	/* offset into the PIN_MUX_CTL_* register bank */
+	s8 mux_bit;	/* offset into the PIN_MUX_CTL_* register bit */
+	s8 pupd_reg;	/* offset into the PULL_UPDOWN_REG_* register bank */
+	s8 pupd_bit;	/* offset into the PULL_UPDOWN_REG_* register bit */
 };
 
 #define PINGROUP(pg_name, f0, f1, f2, f3,			\
@@ -264,9 +264,9 @@ struct tegra_drive_pingroup_desc {
 };
 
 #define DRIVE_PINGROUP(pg_name, r)				\
-	[TEGRA_DRIVE_PINGROUP_ ## pg_name] = {		\
+	[TEGRA_DRIVE_PINGROUP_ ## pg_name] = {			\
 		.name = #pg_name,				\
-		.reg = r 					\
+		.reg = r					\
 	}
 
 static const struct tegra_drive_pingroup_desc drive_pingroups[TEGRA_MAX_PINGROUP] = {
@@ -316,7 +316,7 @@ static const char *tegra_slew_names[TEGRA_MAX_SLEW] = {
 
 static DEFINE_SPINLOCK(mux_lock);
 
-static const char *pingroup_name(tegra_pingroup_t pg)
+static const char *pingroup_name(enum tegra_pingroup pg)
 {
 	if (pg < 0 || pg >=  TEGRA_MAX_PINGROUP)
 		return "<UNKNOWN>";
@@ -324,7 +324,7 @@ static const char *pingroup_name(tegra_pingroup_t pg)
 	return pingroups[pg].name;
 }
 
-static const char *func_name(tegra_mux_func_t func)
+static const char *func_name(enum tegra_mux_func func)
 {
 	if (func == TEGRA_MUX_RSVD1)
 		return "RSVD1";
@@ -381,7 +381,7 @@ static inline void pg_writel(unsigned long value, unsigned long offset)
 	writel(value, IO_TO_VIRT(TEGRA_APB_MISC_BASE + offset));
 }
 
-int tegra_pinmux_set_func(tegra_pingroup_t pg, tegra_mux_func_t func)
+int tegra_pinmux_set_func(enum tegra_pingroup pg, enum tegra_mux_func func)
 {
 	int mux = -1;
 	int i;
@@ -423,7 +423,8 @@ int tegra_pinmux_set_func(tegra_pingroup_t pg, tegra_mux_func_t func)
 	return 0;
 }
 
-int tegra_pinmux_set_tristate(tegra_pingroup_t pg, tegra_tristate_t tristate)
+int tegra_pinmux_set_tristate(enum tegra_pingroup pg,
+	enum tegra_tristate tristate)
 {
 	unsigned long reg;
 	unsigned long flags;
@@ -447,7 +448,8 @@ int tegra_pinmux_set_tristate(tegra_pingroup_t pg, tegra_tristate_t tristate)
 	return 0;
 }
 
-int tegra_pinmux_set_pullupdown(tegra_pingroup_t pg, tegra_pullupdown_t pupd)
+int tegra_pinmux_set_pullupdown(enum tegra_pingroup pg,
+	enum tegra_pullupdown pupd)
 {
 	unsigned long reg;
 	unsigned long flags;
@@ -476,10 +478,10 @@ int tegra_pinmux_set_pullupdown(tegra_pingroup_t pg, tegra_pullupdown_t pupd)
 	return 0;
 }
 
-void tegra_pinmux_config_pingroup(tegra_pingroup_t pingroup,
-				 tegra_mux_func_t func,
-				 tegra_pullupdown_t pupd,
-				 tegra_tristate_t tristate)
+void tegra_pinmux_config_pingroup(enum tegra_pingroup pingroup,
+				 enum tegra_mux_func func,
+				 enum tegra_pullupdown pupd,
+				 enum tegra_tristate tristate)
 {
 	int err;
 
@@ -518,7 +520,7 @@ void tegra_pinmux_config_table(struct tegra_pingroup_config *config, int len)
 					     config[i].tristate);
 }
 
-static const char *drive_pinmux_name(tegra_drive_pingroup_t pg)
+static const char *drive_pinmux_name(enum tegra_drive_pingroup pg)
 {
 	if (pg < 0 || pg >=  TEGRA_MAX_DRIVE_PINGROUP)
 		return "<UNKNOWN>";
@@ -547,7 +549,8 @@ static const char *slew_name(unsigned long val)
 	return tegra_slew_names[val];
 }
 
-static int tegra_drive_pinmux_set_hsm(tegra_drive_pingroup_t pg, tegra_hsm_t hsm)
+static int tegra_drive_pinmux_set_hsm(enum tegra_drive_pingroup pg,
+	enum tegra_hsm hsm)
 {
 	unsigned long flags;
 	u32 reg;
@@ -571,8 +574,8 @@ static int tegra_drive_pinmux_set_hsm(tegra_drive_pingroup_t pg, tegra_hsm_t hsm
 	return 0;
 }
 
-static int tegra_drive_pinmux_set_schmitt(tegra_drive_pingroup_t pg,
-	tegra_schmitt_t schmitt)
+static int tegra_drive_pinmux_set_schmitt(enum tegra_drive_pingroup pg,
+	enum tegra_schmitt schmitt)
 {
 	unsigned long flags;
 	u32 reg;
@@ -596,8 +599,8 @@ static int tegra_drive_pinmux_set_schmitt(tegra_drive_pingroup_t pg,
 	return 0;
 }
 
-static int tegra_drive_pinmux_set_drive(tegra_drive_pingroup_t pg,
-	tegra_drive_t drive)
+static int tegra_drive_pinmux_set_drive(enum tegra_drive_pingroup pg,
+	enum tegra_drive drive)
 {
 	unsigned long flags;
 	u32 reg;
@@ -619,8 +622,8 @@ static int tegra_drive_pinmux_set_drive(tegra_drive_pingroup_t pg,
 	return 0;
 }
 
-static int tegra_drive_pinmux_set_pull_down(tegra_drive_pingroup_t pg,
-	tegra_pull_strength_t pull_down)
+static int tegra_drive_pinmux_set_pull_down(enum tegra_drive_pingroup pg,
+	enum tegra_pull_strength pull_down)
 {
 	unsigned long flags;
 	u32 reg;
@@ -642,8 +645,8 @@ static int tegra_drive_pinmux_set_pull_down(tegra_drive_pingroup_t pg,
 	return 0;
 }
 
-static int tegra_drive_pinmux_set_pull_up(tegra_drive_pingroup_t pg,
-	tegra_pull_strength_t pull_up)
+static int tegra_drive_pinmux_set_pull_up(enum tegra_drive_pingroup pg,
+	enum tegra_pull_strength pull_up)
 {
 	unsigned long flags;
 	u32 reg;
@@ -665,8 +668,8 @@ static int tegra_drive_pinmux_set_pull_up(tegra_drive_pingroup_t pg,
 	return 0;
 }
 
-static int tegra_drive_pinmux_set_slew_rising(tegra_drive_pingroup_t pg,
-	tegra_slew_t slew_rising)
+static int tegra_drive_pinmux_set_slew_rising(enum tegra_drive_pingroup pg,
+	enum tegra_slew slew_rising)
 {
 	unsigned long flags;
 	u32 reg;
@@ -688,8 +691,8 @@ static int tegra_drive_pinmux_set_slew_rising(tegra_drive_pingroup_t pg,
 	return 0;
 }
 
-static int tegra_drive_pinmux_set_slew_falling(tegra_drive_pingroup_t pg,
-	tegra_slew_t slew_falling)
+static int tegra_drive_pinmux_set_slew_falling(enum tegra_drive_pingroup pg,
+	enum tegra_slew slew_falling)
 {
 	unsigned long flags;
 	u32 reg;
@@ -711,14 +714,14 @@ static int tegra_drive_pinmux_set_slew_falling(tegra_drive_pingroup_t pg,
 	return 0;
 }
 
-static void tegra_drive_pinmux_config_pingroup(tegra_drive_pingroup_t pingroup,
-					  tegra_hsm_t hsm,
-					  tegra_schmitt_t schmitt,
-					  tegra_drive_t drive,
-					  tegra_pull_strength_t pull_down,
-					  tegra_pull_strength_t pull_up,
-					  tegra_slew_t slew_rising,
-					  tegra_slew_t slew_falling)
+static void tegra_drive_pinmux_config_pingroup(enum tegra_drive_pingroup pingroup,
+					  enum tegra_hsm hsm,
+					  enum tegra_schmitt schmitt,
+					  enum tegra_drive drive,
+					  enum tegra_pull_strength pull_down,
+					  enum tegra_pull_strength pull_up,
+					  enum tegra_slew slew_rising,
+					  enum tegra_slew slew_falling)
 {
 	int err;
 
