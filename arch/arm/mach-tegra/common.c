@@ -31,6 +31,13 @@
 #include "clock.h"
 #include "fuse.h"
 
+#ifdef CONFIG_DMABOUNCE
+int dma_needs_bounce(struct device *dev, dma_addr_t addr, size_t size)
+{
+	return 0;
+}
+#endif
+
 static __initdata struct tegra_clk_init_table common_clk_init_table[] = {
 	/* name		parent		rate		enabled */
 	{ "clk_m",	NULL,		0,		true },
