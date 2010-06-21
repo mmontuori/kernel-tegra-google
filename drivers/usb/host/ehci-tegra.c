@@ -383,6 +383,14 @@ static int tegra_ehci_probe(struct platform_device *pdev)
 		goto fail_hcd;
 	}
 
+#ifdef CONFIG_DMABOUNCE
+	err = dmabounce_register_dev(&pdev->dev, 2048, 16384);
+	if (err != 0) {
+		dev_err(&pdev->dev, "failed to register with dmabounce\n");
+		goto fail_dmabounce;
+	}
+#endif
+
 	platform_set_drvdata(pdev, tegra);
 	INIT_WORK(&tegra->work, tegra_ehci_irq_work);
 
@@ -507,6 +515,10 @@ fail_io:
 fail_clken:
 	clk_put(tegra->clk);
 fail_clk:
+#ifdef CONFIG_DMABOUNCE
+	dmabounce_unregister_dev(&pdev->dev);
+fail_dmabounce:
+#endif
 	usb_put_hcd(hcd);
 fail_hcd:
 	kfree(tegra);
@@ -567,6 +579,9 @@ static int tegra_ehci_remove(struct platform_device *pdev)
 	clk_put(tegra->clk);
 	usb_put_hcd(hcd);
 
+#ifdef CONFIG_DMABOUNCE
+	dmabounce_unregister_dev(&pdev->dev);
+#endif
 	kfree(tegra);
 	return 0;
 }
