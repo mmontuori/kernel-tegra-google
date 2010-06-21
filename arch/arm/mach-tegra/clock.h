@@ -85,6 +85,7 @@ struct clk {
 	struct clk			*parent;
 	struct clk_lookup		lookup;
 	unsigned long			rate;
+	unsigned long			max_rate;
 	u32				flags;
 	u32				refcnt;
 	const char			*name;
