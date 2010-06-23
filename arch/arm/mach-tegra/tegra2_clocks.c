@@ -30,6 +30,7 @@
 #include <mach/iomap.h>
 
 #include "clock.h"
+#include "fuse.h"
 
 #define RST_DEVICES			0x004
 #define RST_DEVICES_SET			0x300
@@ -502,6 +503,22 @@ static int tegra2_pll_clk_set_rate(struct clk *c, unsigned long rate)
 
 static struct clk_ops tegra_pll_ops = {
 	.init     = tegra2_pll_clk_init,
+	.enable   = tegra2_pll_clk_enable,
+	.disable  = tegra2_pll_clk_disable,
+	.set_rate = tegra2_pll_clk_set_rate,
+	.recalculate_rate = tegra2_pll_clk_recalculate_rate,
+};
+
+static void tegra2_pllx_clk_init(struct clk *c)
+{
+	tegra2_pll_clk_init(c);
+
+	if (tegra_sku_id() == 7)
+		c->max_rate = 750000000;
+}
+
+static struct clk_ops tegra_pllx_ops = {
+	.init     = tegra2_pllx_clk_init,
 	.enable   = tegra2_pll_clk_enable,
 	.disable  = tegra2_pll_clk_disable,
 	.set_rate = tegra2_pll_clk_set_rate,
@@ -1166,10 +1183,39 @@ static struct clk_pll_table tegra_pll_x_table[] = {
 	{ 0, 0, 0, 0, 0, 0 },
 };
 
+static struct dvfs_table tegra_pll_x_dvfs_table[] = {
+	{314000000,  750,  0},
+	{456000000,  825,  0},
+	{608000000,  900,  0},
+	{760000000,  975,  0},
+	{817000000,  1000, 0},
+	{912000000,  1050, 0},
+	{1000000000, 1100, 0},
+
+	{314000000,  750,  1},
+	{456000000,  825,  1},
+	{618000000,  900,  1},
+	{770000000,  975,  1},
+	{827000000,  1000, 1},
+	{922000000,  1050, 1},
+	{1000000000, 1100, 1},
+
+	{494000000,  750,  2},
+	{675000000,  825,  2},
+	{817000000,  875,  2},
+	{922000000,  925,  2},
+	{1000000000, 975,  2},
+
+	{730000000,  750,  3},
+	{760000000,  775,  3},
+	{845000000,  800,  3},
+	{1000000000, 875,  3},
+};
+
 static struct clk tegra_pll_x = {
 	.name      = "pll_x",
 	.flags     = PLL_HAS_CPCON | PLL_ALT_MISC_REG,
-	.ops       = &tegra_pll_ops,
+	.ops       = &tegra_pllx_ops,
 	.reg       = 0xe0,
 	.input_min = 2000000,
 	.input_max = 31000000,
@@ -1180,6 +1226,11 @@ static struct clk tegra_pll_x = {
 	.vco_max   = 1200000000,
 	.pll_table = tegra_pll_x_table,
 	.max_rate  = 1000000000,
+	.dvfs      = {
+		.reg_id = "VDD_CPU",
+		.table = tegra_pll_x_dvfs_table,
+		.cpu = 1,
+	},
 };
 
 static struct clk tegra_clk_d = {
