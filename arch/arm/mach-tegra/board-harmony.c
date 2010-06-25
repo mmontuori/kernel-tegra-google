@@ -332,6 +332,10 @@ static struct tegra_suspend_platform_data harmony_suspend_data = {
 	.separate_req = true,
 	.corereq_high = false,
 	.sysclkreq_high = true,
+	.wake_enb = 0,
+	.wake_low = 0,
+	.wake_high = 0,
+	.wake_any = 0,
 };
 
 static void __init tegra_harmony_init(void)
