@@ -177,12 +177,14 @@ static int tegra_sdhci_remove(struct platform_device *pdev)
 #ifdef CONFIG_PM
 static int tegra_sdhci_suspend(struct platform_device *pdev, pm_message_t state)
 {
-	return -1;
+	struct tegra_sdhci_host *host = platform_get_drvdata(pdev);
+	return sdhci_suspend_host(host->sdhci, state);
 }
 
 static int tegra_sdhci_resume(struct platform_device *pdev)
 {
-	return -1;
+	struct tegra_sdhci_host *host = platform_get_drvdata(pdev);
+	return sdhci_resume_host(host->sdhci);
 }
 #else
 #define tegra_sdhci_suspend    NULL
