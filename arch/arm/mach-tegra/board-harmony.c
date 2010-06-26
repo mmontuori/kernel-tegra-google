@@ -41,6 +41,7 @@
 #include "board-harmony.h"
 #include "clock.h"
 #include "devices.h"
+#include "power.h"
 
 /* NVidia bootloader tags */
 #define ATAG_NVIDIA		0x41000801
@@ -321,6 +322,18 @@ static void __init tegra_harmony_fixup(struct machine_desc *desc, struct tag *ta
 	mi->bank[1].size = SZ_512M;
 }
 
+static struct tegra_suspend_platform_data harmony_suspend_data = {
+	.cpu_timer = 2000,
+	.cpu_off_timer = 0,
+	.dram_suspend = false,
+	.core_off = false,
+	.core_timer = 0x7e7e,
+	.core_off_timer = 0,
+	.separate_req = true,
+	.corereq_high = false,
+	.sysclkreq_high = true,
+};
+
 static void __init tegra_harmony_init(void)
 {
 	struct clk *clk;
@@ -334,6 +347,7 @@ static void __init tegra_harmony_init(void)
 	harmony_pinmux_init();
 
 	tegra_clk_init_from_table(harmony_clk_init_table);
+	tegra_init_suspend(&harmony_suspend_data);
 
 	clk = tegra_get_clock_by_name("uartd");
 	debug_uart_platform_data[0].uartclk = clk_get_rate(clk);
