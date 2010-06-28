@@ -343,6 +343,7 @@ struct tegra_drive_pingroup_config {
 	enum tegra_slew slew_falling;
 };
 
+int tegra_pinmux_cancel_func(enum tegra_pingroup pg, enum tegra_mux_func func);
 int tegra_pinmux_set_func(enum tegra_pingroup pg, enum tegra_mux_func func);
 int tegra_pinmux_set_tristate(enum tegra_pingroup pg, enum tegra_tristate tristate);
 int tegra_pinmux_set_pullupdown(enum tegra_pingroup pg, enum tegra_pullupdown pupd);
@@ -355,6 +356,13 @@ void tegra_pinmux_config_table(struct tegra_pingroup_config *config, int len);
 
 void tegra_drive_pinmux_config_table(struct tegra_drive_pingroup_config *config,
 	int len);
-
+void tegra_pinmux_config_pinmux_table(const struct tegra_pingroup_config *config,
+	int len, bool is_set);
+void tegra_pinmux_config_tristate_table(const struct tegra_pingroup_config *config,
+	int len, enum tegra_tristate tristate);
+void tegra_pinmux_config_pullupdown_table(const struct tegra_pingroup_config *config,
+	int len, enum tegra_pullupdown pupd);
+void tegra_pinmux_set_vddio_tristate(enum tegra_vddio vddio,
+	enum tegra_tristate tristate);
 #endif
 
