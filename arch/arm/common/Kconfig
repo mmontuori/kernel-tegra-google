@@ -45,6 +45,7 @@ config COMMON_CLKDEV
 config FIQ_DEBUGGER
 	bool
 	select FIQ
+	select KERNEL_DEBUGGER_CORE
 
 config FIQ_DEBUGGER_NO_SLEEP
 	bool
