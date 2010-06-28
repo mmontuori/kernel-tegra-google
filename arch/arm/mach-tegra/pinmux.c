@@ -155,6 +155,8 @@ static const char *tegra_slew_names[TEGRA_MAX_SLEW] = {
 
 static DEFINE_SPINLOCK(mux_lock);
 
+static int tristate_refcount[TEGRA_MAX_PINGROUP];
+
 static const char *pingroup_name(enum tegra_pingroup pg)
 {
 	if (pg < 0 || pg >=  TEGRA_MAX_PINGROUP)
@@ -344,6 +346,7 @@ int tegra_pinmux_set_tristate(enum tegra_pingroup pg,
 {
 	unsigned long reg;
 	unsigned long flags;
+	bool is_update  = false;
 
 	if (pg < 0 || pg >=  TEGRA_MAX_PINGROUP)
 		return -ERANGE;
@@ -353,14 +356,24 @@ int tegra_pinmux_set_tristate(enum tegra_pingroup pg,
 
 	spin_lock_irqsave(&mux_lock, flags);
 
-	reg = pg_readl(pingroups[pg].tri_reg);
-	reg &= ~(0x1 << pingroups[pg].tri_bit);
-	if (tristate)
-		reg |= 1 << pingroups[pg].tri_bit;
-	pg_writel(reg, pingroups[pg].tri_reg);
+	if (tristate == TEGRA_TRI_NORMAL) {
+		is_update = (tristate_refcount[pg] == 0);
+		tristate_refcount[pg]++;
+	} else {
+		is_update = (tristate_refcount[pg] == 1);
+		if (tristate_refcount[pg] > 0) {
+			tristate_refcount[pg]--;
+		}
+	}
+	if (is_update) {
+		reg = pg_readl(pingroups[pg].tri_reg);
+		reg &= ~(0x1 << pingroups[pg].tri_bit);
+		if (tristate)
+			reg |= 1 << pingroups[pg].tri_bit;
+		pg_writel(reg, pingroups[pg].tri_reg);
+	}
 
 	spin_unlock_irqrestore(&mux_lock, flags);
-
 	return 0;
 }
 
