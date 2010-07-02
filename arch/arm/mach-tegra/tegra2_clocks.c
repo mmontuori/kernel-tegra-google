@@ -160,11 +160,13 @@ unsigned long clk_measure_input_freq(void)
 
 static int clk_div71_get_divider(struct clk *c, unsigned long rate)
 {
-	unsigned long divider_u71;
+	s64 divider_u71 = c->parent->rate * 2;
+	do_div(divider_u71, rate);
 
-	divider_u71 = DIV_ROUND_UP(c->rate * 2, rate);
+	if (divider_u71 - 2 < 0)
+		return 0;
 
-	if (divider_u71 - 2 > 255 || divider_u71 - 2 < 0)
+	if (divider_u71 - 2 > 255)
 		return -EINVAL;
 
 	return divider_u71 - 2;
@@ -172,11 +174,15 @@ static int clk_div71_get_divider(struct clk *c, unsigned long rate)
 
 static int clk_div16_get_divider(struct clk *c, unsigned long rate)
 {
-	unsigned long divider_u16;
+	s64 divider_u16;
 
-	divider_u16 = DIV_ROUND_UP(c->rate, rate);
+	divider_u16 = c->parent->rate;
+	do_div(c->parent->rate, rate);
 
-	if (divider_u16 - 1 > 255 || divider_u16 - 1 < 0)
+	if (divider_u16 - 1 < 0)
+		return 0;
+
+	if (divider_u16 - 1 > 255)
 		return -EINVAL;
 
 	return divider_u16 - 1;
