@@ -164,7 +164,10 @@ static int clk_div71_get_divider(struct clk *c, unsigned long rate)
 
 	divider_u71 = DIV_ROUND_UP(c->rate * 2, rate);
 
-	if (divider_u71 - 2 > 255 || divider_u71 - 2 < 0)
+	if (divider_u71 - 2 < 0)
+		return 0;
+
+	if (divider_u71 - 2 > 255)
 		return -EINVAL;
 
 	return divider_u71 - 2;
