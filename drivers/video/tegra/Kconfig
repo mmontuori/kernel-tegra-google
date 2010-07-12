@@ -1,0 +1,5 @@
+config TEGRA_DC
+	tristate "Tegra Display Contoller"
+	depends on ARCH_TEGRA
+	help
+	  Tegra display controller support.
