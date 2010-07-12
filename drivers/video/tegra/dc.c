@@ -1,0 +1,705 @@
+/*
+ * drivers/video/tegra/dc.c
+ *
+ * Copyright (C) 2010 Google, Inc.
+ * Author: Erik Gilling <konkers@android.com>
+ *
+ * This software is licensed under the terms of the GNU General Public
+ * License version 2, as published by the Free Software Foundation, and
+ * may be copied, distributed, and modified under those terms.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ */
+
+#define DEBUG
+
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/err.h>
+#include <linux/errno.h>
+#include <linux/platform_device.h>
+#include <linux/interrupt.h>
+#include <linux/slab.h>
+#include <linux/io.h>
+#include <linux/clk.h>
+#include <linux/mutex.h>
+#include <linux/delay.h>
+#include <linux/dma-mapping.h>
+#include <linux/workqueue.h>
+#include <linux/ktime.h>
+
+#include <mach/dc.h>
+
+#include "dc_reg.h"
+
+struct tegra_dc_blend tegra_dc_blend_modes[][DC_N_WINDOWS] = {
+	{{.nokey = BLEND(NOKEY, FIX, 0xff, 0xff),
+	  .one_win = BLEND(NOKEY, FIX, 0xff, 0xff),
+	  .two_win_x = BLEND(NOKEY, FIX, 0x00, 0x00),
+	  .two_win_y = BLEND(NOKEY, DEPENDANT, 0x00, 0x00),
+	  .three_win_xy = BLEND(NOKEY, FIX, 0x00, 0x00)},
+	 {.nokey = BLEND(NOKEY, FIX, 0xff, 0xff),
+	  .one_win = BLEND(NOKEY, FIX, 0xff, 0xff),
+	  .two_win_x = BLEND(NOKEY, FIX, 0xff, 0xff),
+	  .two_win_y = BLEND(NOKEY, DEPENDANT, 0x00, 0x00),
+	  .three_win_xy = BLEND(NOKEY, DEPENDANT, 0x00, 0x00)},
+	 {.nokey = BLEND(NOKEY, FIX, 0xff, 0xff),
+	  .one_win = BLEND(NOKEY, FIX, 0xff, 0xff),
+	  .two_win_x = BLEND(NOKEY, ALPHA, 0xff, 0xff),
+	  .two_win_y = BLEND(NOKEY, ALPHA, 0xff, 0xff),
+	  .three_win_xy = BLEND(NOKEY, ALPHA, 0xff, 0xff)}
+	}
+};
+
+struct tegra_dc {
+	struct list_head		list;
+
+	struct platform_device		*pdev;
+	struct tegra_dc_platform_data	*pdata;
+
+	struct resource			*base_res;
+	void __iomem			*base;
+	int				irq;
+
+	struct clk			*clk;
+	struct clk			*host1x_clk;
+
+	struct tegra_dc_out		*out;
+
+	struct tegra_dc_win		windows[DC_N_WINDOWS];
+	int				n_windows;
+
+	wait_queue_head_t		wq;
+
+	spinlock_t			lock;
+};
+
+struct tegra_dc *tegra_dcs[TEGRA_MAX_DC];
+
+DEFINE_MUTEX(tegra_dc_lock);
+
+
+static inline int tegra_dc_fmt_bpp(int fmt)
+{
+	switch(fmt) {
+	case TEGRA_WIN_FMT_P1:
+		return 1;
+
+	case TEGRA_WIN_FMT_P2:
+		return 2;
+
+	case TEGRA_WIN_FMT_P4:
+		return 4;
+
+	case TEGRA_WIN_FMT_P8:
+		return 8;
+
+	case TEGRA_WIN_FMT_B4G4R4A4:
+	case TEGRA_WIN_FMT_B5G5R5A:
+	case TEGRA_WIN_FMT_B5G6R5:
+	case TEGRA_WIN_FMT_AB5G5R5:
+		return 16;
+
+	case TEGRA_WIN_FMT_B8G8R8A8:
+	case TEGRA_WIN_FMT_R8G8B8A8:
+	case TEGRA_WIN_FMT_B6x2G6x2R6x2A8:
+	case TEGRA_WIN_FMT_R6x2G6x2B6x2A8:
+		return 32;
+
+	case TEGRA_WIN_FMT_YCbCr422:
+	case TEGRA_WIN_FMT_YUV422:
+	case TEGRA_WIN_FMT_YCbCr420P:
+	case TEGRA_WIN_FMT_YUV420P:
+	case TEGRA_WIN_FMT_YCbCr422P:
+	case TEGRA_WIN_FMT_YUV422P:
+	case TEGRA_WIN_FMT_YCbCr422R:
+	case TEGRA_WIN_FMT_YUV422R:
+	case TEGRA_WIN_FMT_YCbCr422RA:
+	case TEGRA_WIN_FMT_YUV422RA:
+		/* FIXME: need to know the bpp of these formats */
+		return 0;
+	}
+	return 0;
+}
+
+
+static unsigned long tegra_dc_readl(struct tegra_dc *dc, unsigned long reg)
+{
+        return readl(dc->base + reg * 4);
+}
+
+static void tegra_dc_writel(struct tegra_dc *dc, unsigned long val,
+                       unsigned long reg)
+{
+        writel(val, dc->base + reg * 4);
+
+}
+
+
+#ifdef DEBUG
+#define DUMP_REG(a) dev_dbg(&dc->pdev->dev, "%-32s\t%03x\t%08lx\n", #a, a, tegra_dc_readl(dc, a));
+static void dump_regs(struct tegra_dc *dc)
+{
+	int i;
+
+	DUMP_REG(DC_CMD_GENERAL_INCR_SYNCPT);
+	DUMP_REG(DC_CMD_GENERAL_INCR_SYNCPT_CNTRL);
+	DUMP_REG(DC_CMD_GENERAL_INCR_SYNCPT_ERROR);
+	DUMP_REG(DC_CMD_WIN_A_INCR_SYNCPT);
+	DUMP_REG(DC_CMD_WIN_A_INCR_SYNCPT_CNTRL);
+	DUMP_REG(DC_CMD_WIN_A_INCR_SYNCPT_ERROR);
+	DUMP_REG(DC_CMD_WIN_B_INCR_SYNCPT);
+	DUMP_REG(DC_CMD_WIN_B_INCR_SYNCPT_CNTRL);
+	DUMP_REG(DC_CMD_WIN_B_INCR_SYNCPT_ERROR);
+	DUMP_REG(DC_CMD_WIN_C_INCR_SYNCPT);
+	DUMP_REG(DC_CMD_WIN_C_INCR_SYNCPT_CNTRL);
+	DUMP_REG(DC_CMD_WIN_C_INCR_SYNCPT_ERROR);
+	DUMP_REG(DC_CMD_CONT_SYNCPT_VSYNC);
+	DUMP_REG(DC_CMD_DISPLAY_COMMAND_OPTION0);
+	DUMP_REG(DC_CMD_DISPLAY_COMMAND);
+	DUMP_REG(DC_CMD_SIGNAL_RAISE);
+	DUMP_REG(DC_CMD_INT_STATUS);
+	DUMP_REG(DC_CMD_INT_MASK);
+	DUMP_REG(DC_CMD_INT_ENABLE);
+	DUMP_REG(DC_CMD_INT_TYPE);
+	DUMP_REG(DC_CMD_INT_POLARITY);
+	DUMP_REG(DC_CMD_SIGNAL_RAISE1);
+	DUMP_REG(DC_CMD_SIGNAL_RAISE2);
+	DUMP_REG(DC_CMD_SIGNAL_RAISE3);
+	DUMP_REG(DC_CMD_STATE_ACCESS);
+	DUMP_REG(DC_CMD_STATE_CONTROL);
+	DUMP_REG(DC_CMD_DISPLAY_WINDOW_HEADER);
+	DUMP_REG(DC_CMD_REG_ACT_CONTROL);
+
+	DUMP_REG(DC_DISP_DISP_SIGNAL_OPTIONS0);
+	DUMP_REG(DC_DISP_DISP_SIGNAL_OPTIONS1);
+	DUMP_REG(DC_DISP_DISP_WIN_OPTIONS);
+	DUMP_REG(DC_DISP_MEM_HIGH_PRIORITY);
+	DUMP_REG(DC_DISP_MEM_HIGH_PRIORITY_TIMER);
+	DUMP_REG(DC_DISP_DISP_TIMING_OPTIONS);
+	DUMP_REG(DC_DISP_REF_TO_SYNC);
+	DUMP_REG(DC_DISP_SYNC_WIDTH);
+	DUMP_REG(DC_DISP_BACK_PORCH);
+	DUMP_REG(DC_DISP_DISP_ACTIVE);
+	DUMP_REG(DC_DISP_FRONT_PORCH);
+	DUMP_REG(DC_DISP_H_PULSE0_CONTROL);
+	DUMP_REG(DC_DISP_H_PULSE0_POSITION_A);
+	DUMP_REG(DC_DISP_H_PULSE0_POSITION_B);
+	DUMP_REG(DC_DISP_H_PULSE0_POSITION_C);
+	DUMP_REG(DC_DISP_H_PULSE0_POSITION_D);
+	DUMP_REG(DC_DISP_H_PULSE1_CONTROL);
+	DUMP_REG(DC_DISP_H_PULSE1_POSITION_A);
+	DUMP_REG(DC_DISP_H_PULSE1_POSITION_B);
+	DUMP_REG(DC_DISP_H_PULSE1_POSITION_C);
+	DUMP_REG(DC_DISP_H_PULSE1_POSITION_D);
+	DUMP_REG(DC_DISP_H_PULSE2_CONTROL);
+	DUMP_REG(DC_DISP_H_PULSE2_POSITION_A);
+	DUMP_REG(DC_DISP_H_PULSE2_POSITION_B);
+	DUMP_REG(DC_DISP_H_PULSE2_POSITION_C);
+	DUMP_REG(DC_DISP_H_PULSE2_POSITION_D);
+	DUMP_REG(DC_DISP_V_PULSE0_CONTROL);
+	DUMP_REG(DC_DISP_V_PULSE0_POSITION_A);
+	DUMP_REG(DC_DISP_V_PULSE0_POSITION_B);
+	DUMP_REG(DC_DISP_V_PULSE0_POSITION_C);
+	DUMP_REG(DC_DISP_V_PULSE1_CONTROL);
+	DUMP_REG(DC_DISP_V_PULSE1_POSITION_A);
+	DUMP_REG(DC_DISP_V_PULSE1_POSITION_B);
+	DUMP_REG(DC_DISP_V_PULSE1_POSITION_C);
+	DUMP_REG(DC_DISP_V_PULSE2_CONTROL);
+	DUMP_REG(DC_DISP_V_PULSE2_POSITION_A);
+	DUMP_REG(DC_DISP_V_PULSE3_CONTROL);
+	DUMP_REG(DC_DISP_V_PULSE3_POSITION_A);
+	DUMP_REG(DC_DISP_M0_CONTROL);
+	DUMP_REG(DC_DISP_M1_CONTROL);
+	DUMP_REG(DC_DISP_DI_CONTROL);
+	DUMP_REG(DC_DISP_PP_CONTROL);
+	DUMP_REG(DC_DISP_PP_SELECT_A);
+	DUMP_REG(DC_DISP_PP_SELECT_B);
+	DUMP_REG(DC_DISP_PP_SELECT_C);
+	DUMP_REG(DC_DISP_PP_SELECT_D);
+	DUMP_REG(DC_DISP_DISP_CLOCK_CONTROL);
+	DUMP_REG(DC_DISP_DISP_INTERFACE_CONTROL);
+	DUMP_REG(DC_DISP_DISP_COLOR_CONTROL);
+	DUMP_REG(DC_DISP_SHIFT_CLOCK_OPTIONS);
+	DUMP_REG(DC_DISP_DATA_ENABLE_OPTIONS);
+	DUMP_REG(DC_DISP_SERIAL_INTERFACE_OPTIONS);
+	DUMP_REG(DC_DISP_LCD_SPI_OPTIONS);
+	DUMP_REG(DC_DISP_BORDER_COLOR);
+	DUMP_REG(DC_DISP_COLOR_KEY0_LOWER);
+	DUMP_REG(DC_DISP_COLOR_KEY0_UPPER);
+	DUMP_REG(DC_DISP_COLOR_KEY1_LOWER);
+	DUMP_REG(DC_DISP_COLOR_KEY1_UPPER);
+	DUMP_REG(DC_DISP_CURSOR_FOREGROUND);
+	DUMP_REG(DC_DISP_CURSOR_BACKGROUND);
+	DUMP_REG(DC_DISP_CURSOR_START_ADDR);
+	DUMP_REG(DC_DISP_CURSOR_START_ADDR_NS);
+	DUMP_REG(DC_DISP_CURSOR_POSITION);
+	DUMP_REG(DC_DISP_CURSOR_POSITION_NS);
+	DUMP_REG(DC_DISP_INIT_SEQ_CONTROL);
+	DUMP_REG(DC_DISP_SPI_INIT_SEQ_DATA_A);
+	DUMP_REG(DC_DISP_SPI_INIT_SEQ_DATA_B);
+	DUMP_REG(DC_DISP_SPI_INIT_SEQ_DATA_C);
+	DUMP_REG(DC_DISP_SPI_INIT_SEQ_DATA_D);
+	DUMP_REG(DC_DISP_DC_MCCIF_FIFOCTRL);
+	DUMP_REG(DC_DISP_MCCIF_DISPLAY0A_HYST);
+	DUMP_REG(DC_DISP_MCCIF_DISPLAY0B_HYST);
+	DUMP_REG(DC_DISP_MCCIF_DISPLAY0C_HYST);
+	DUMP_REG(DC_DISP_MCCIF_DISPLAY1B_HYST);
+	DUMP_REG(DC_DISP_DAC_CRT_CTRL);
+	DUMP_REG(DC_DISP_DISP_MISC_CONTROL);
+
+
+	for (i = 0; i < 3; i++) {
+		dev_dbg(&dc->pdev->dev, "\n");
+		dev_dbg(&dc->pdev->dev, "WINDOW %c:\n", 'A' + i);
+
+		tegra_dc_writel(dc, WINDOW_A_SELECT << i, DC_CMD_DISPLAY_WINDOW_HEADER);
+		DUMP_REG(DC_CMD_DISPLAY_WINDOW_HEADER);
+		DUMP_REG(DC_WIN_WIN_OPTIONS);
+		DUMP_REG(DC_WIN_BYTE_SWAP);
+		DUMP_REG(DC_WIN_BUFFER_CONTROL);
+		DUMP_REG(DC_WIN_COLOR_DEPTH);
+		DUMP_REG(DC_WIN_POSITION);
+		DUMP_REG(DC_WIN_SIZE);
+		DUMP_REG(DC_WIN_PRESCALED_SIZE);
+		DUMP_REG(DC_WIN_H_INITIAL_DDA);
+		DUMP_REG(DC_WIN_V_INITIAL_DDA);
+		DUMP_REG(DC_WIN_DDA_INCREMENT);
+		DUMP_REG(DC_WIN_LINE_STRIDE);
+		DUMP_REG(DC_WIN_BUF_STRIDE);
+		DUMP_REG(DC_WIN_BLEND_NOKEY);
+		DUMP_REG(DC_WIN_BLEND_1WIN);
+		DUMP_REG(DC_WIN_BLEND_2WIN_X);
+		DUMP_REG(DC_WIN_BLEND_2WIN_Y);
+		DUMP_REG(DC_WIN_BLEND_3WIN_XY);
+		DUMP_REG(DC_WINBUF_START_ADDR);
+		DUMP_REG(DC_WINBUF_ADDR_H_OFFSET);
+		DUMP_REG(DC_WINBUF_ADDR_V_OFFSET);
+	}
+}
+#endif
+
+
+static int tegra_dc_add(struct tegra_dc *dc, int index)
+{
+	int ret = 0;
+
+	mutex_lock(&tegra_dc_lock);
+	if (index > TEGRA_MAX_DC) {
+		ret = -ENOMEM;
+		goto out;
+	}
+
+	if (tegra_dcs[index] != NULL) {
+		ret = -EBUSY;
+		goto out;
+	}
+
+	tegra_dcs[index] = dc;
+
+out:
+	mutex_unlock(&tegra_dc_lock);
+
+	return ret;
+}
+
+struct tegra_dc *tegra_dc_get_dc(unsigned idx)
+{
+	if (idx < TEGRA_MAX_DC)
+		return tegra_dcs[idx];
+	else
+		return NULL;
+}
+EXPORT_SYMBOL(tegra_dc_get_dc);
+
+struct tegra_dc_win *tegra_dc_get_window(struct tegra_dc *dc, unsigned win)
+{
+	if (win >= dc->n_windows)
+		return NULL;
+
+	return &dc->windows[win];
+}
+EXPORT_SYMBOL(tegra_dc_get_window);
+
+/* does not support updating windows on multiple dcs in one call */
+int tegra_dc_update_windows(struct tegra_dc_win *windows[], int n)
+{
+	struct tegra_dc *dc;
+	unsigned long update_mask = GENERAL_ACT_REQ;
+	unsigned long val;
+	unsigned long flags;
+	int i;
+
+	if (n < 0 || n > DC_N_WINDOWS)
+		return -EINVAL;
+
+	dc = windows[0]->dc;
+
+	spin_lock_irqsave(&dc->lock, flags);
+	for (i = 0; i < n; i++) {
+		struct tegra_dc_win *win = windows[i];
+		unsigned h_dda;
+		unsigned v_dda;
+		unsigned stride;
+
+		tegra_dc_writel(dc, WINDOW_A_SELECT << win->idx,
+				DC_CMD_DISPLAY_WINDOW_HEADER);
+
+		update_mask |= WIN_A_ACT_REQ << win->idx;
+
+		if (!(win->flags & TEGRA_WIN_FLAG_ENABLED)) {
+			tegra_dc_writel(dc, 0, DC_WIN_WIN_OPTIONS);
+			continue;
+		}
+
+		tegra_dc_writel(dc, win->fmt, DC_WIN_COLOR_DEPTH);
+		tegra_dc_writel(dc, 0, DC_WIN_BYTE_SWAP);
+
+		stride = win->w * tegra_dc_fmt_bpp(win->fmt) / 8;
+
+		/* TODO: implement filter on settings */
+		h_dda = (win->w * 0x1000) / (win->out_w - 1);
+		v_dda = (win->h * 0x1000) / (win->out_h - 1);
+
+		tegra_dc_writel(dc,
+				V_POSITION(win->y) | H_POSITION(win->x),
+				DC_WIN_POSITION);
+		tegra_dc_writel(dc,
+				V_SIZE(win->out_h) | H_SIZE(win->out_w),
+				DC_WIN_SIZE);
+		tegra_dc_writel(dc,
+				V_PRESCALED_SIZE(win->out_h) |
+				H_PRESCALED_SIZE(stride),
+				DC_WIN_PRESCALED_SIZE);
+		tegra_dc_writel(dc, 0, DC_WIN_H_INITIAL_DDA);
+		tegra_dc_writel(dc, 0, DC_WIN_V_INITIAL_DDA);
+		tegra_dc_writel(dc, V_DDA_INC(v_dda) | H_DDA_INC(h_dda),
+				DC_WIN_DDA_INCREMENT);
+		tegra_dc_writel(dc, stride, DC_WIN_LINE_STRIDE);
+		tegra_dc_writel(dc, 0, DC_WIN_BUF_STRIDE);
+
+		val = WIN_ENABLE;
+		if (win->flags & TEGRA_WIN_FLAG_COLOR_EXPAND)
+			val |= COLOR_EXPAND;
+		tegra_dc_writel(dc, val, DC_WIN_WIN_OPTIONS);
+
+		tegra_dc_writel(dc, (unsigned long)win->phys_addr, DC_WINBUF_START_ADDR);
+		tegra_dc_writel(dc, 0, DC_WINBUF_ADDR_H_OFFSET);
+		tegra_dc_writel(dc, 0, DC_WINBUF_ADDR_V_OFFSET);
+
+		win->dirty = 1;
+
+	}
+
+	tegra_dc_writel(dc, update_mask << 8, DC_CMD_STATE_CONTROL);
+
+	val = tegra_dc_readl(dc, DC_CMD_INT_ENABLE);
+	val |= FRAME_END_INT;
+	tegra_dc_writel(dc, val, DC_CMD_INT_ENABLE);
+
+	val = tegra_dc_readl(dc, DC_CMD_INT_MASK);
+	val |= FRAME_END_INT;
+	tegra_dc_writel(dc, val, DC_CMD_INT_MASK);
+
+	tegra_dc_writel(dc, update_mask, DC_CMD_STATE_CONTROL);
+	spin_unlock_irqrestore(&dc->lock, flags);
+
+	return 0;
+}
+EXPORT_SYMBOL(tegra_dc_update_windows);
+
+/* does not support syncing windows on multiple dcs in one call */
+int tegra_dc_sync_windows(struct tegra_dc_win *windows[], int n)
+{
+	if (n < 1 || n > DC_N_WINDOWS)
+		return -EINVAL;
+
+	wait_event_interruptible_timeout(windows[0]->dc->wq,
+					 !windows[0]->dirty &&
+					 (n > 1 ? !windows[1]->dirty : 1) &&
+					 (n > 2 ? !windows[2]->dirty : 1),
+
+					 HZ);
+
+	return 0;
+}
+EXPORT_SYMBOL(tegra_dc_sync_windows);
+
+void tegra_dc_set_blending(struct tegra_dc *dc, struct tegra_dc_blend *blend)
+{
+	int i;
+
+	for (i = 0; i < DC_N_WINDOWS; i++) {
+		tegra_dc_writel(dc, WINDOW_A_SELECT << i, DC_CMD_DISPLAY_WINDOW_HEADER);
+		tegra_dc_writel(dc, blend[i].nokey, DC_WIN_BLEND_NOKEY);
+		tegra_dc_writel(dc, blend[i].one_win, DC_WIN_BLEND_1WIN);
+		tegra_dc_writel(dc, blend[i].two_win_x, DC_WIN_BLEND_2WIN_X);
+		tegra_dc_writel(dc, blend[i].two_win_y, DC_WIN_BLEND_2WIN_Y);
+		tegra_dc_writel(dc, blend[i].three_win_xy, DC_WIN_BLEND_3WIN_XY);
+	}
+}
+EXPORT_SYMBOL(tegra_dc_set_blending);
+
+int tegra_dc_set_mode(struct tegra_dc *dc, struct tegra_dc_mode *mode)
+{
+	unsigned long val;
+	unsigned long rate;
+	unsigned long div;
+
+	tegra_dc_writel(dc, 0x0, DC_DISP_DISP_TIMING_OPTIONS);
+	tegra_dc_writel(dc, mode->h_ref_to_sync | (mode->v_ref_to_sync << 16),
+			DC_DISP_REF_TO_SYNC);
+	tegra_dc_writel(dc, mode->h_sync_width | (mode->v_sync_width << 16),
+			DC_DISP_SYNC_WIDTH);
+	tegra_dc_writel(dc, mode->h_back_porch | (mode->v_back_porch << 16),
+			DC_DISP_BACK_PORCH);
+	tegra_dc_writel(dc, mode->h_active | (mode->v_active << 16),
+			DC_DISP_DISP_ACTIVE);
+	tegra_dc_writel(dc, mode->h_front_porch | (mode->v_front_porch << 16),
+			DC_DISP_FRONT_PORCH);
+
+	tegra_dc_writel(dc, DE_SELECT_ACTIVE | DE_CONTROL_NORMAL,
+			DC_DISP_DATA_ENABLE_OPTIONS);
+
+	/* TODO: MIPI/CRT/HDMI clock cals */
+
+	val = DISP_DATA_FORMAT_DF1P1C;
+
+	if (dc->out->align == TEGRA_DC_ALIGN_MSB)
+		val |= DISP_DATA_ALIGNMENT_MSB;
+	else
+		val |= DISP_DATA_ALIGNMENT_LSB;
+
+	if (dc->out->order == TEGRA_DC_ORDER_RED_BLUE)
+		val |= DISP_DATA_ORDER_RED_BLUE;
+	else
+		val |= DISP_DATA_ORDER_BLUE_RED;
+
+	tegra_dc_writel(dc, val, DC_DISP_DISP_INTERFACE_CONTROL);
+
+	rate = clk_get_rate(dc->clk);
+
+	div = (rate * 2 + mode->pclk / 2) / mode->pclk - 2;
+
+	if (rate * 2 / (div + 2) < (mode->pclk / 100 * 99) ||
+	    rate * 2 / (div + 2) > (mode->pclk / 100 * 109)) {
+		dev_err(&dc->pdev->dev,
+			"can't divide %ld clock to %d -1/+9%% %ld %d %d\n",
+			rate, mode->pclk,
+			rate / div, (mode->pclk / 100 * 99),
+			(mode->pclk / 100 * 109));
+		return -EINVAL;
+	}
+
+	tegra_dc_writel(dc, PIXEL_CLK_DIVIDER_PCD1 | SHIFT_CLK_DIVIDER(div),
+			DC_DISP_DISP_CLOCK_CONTROL);
+
+	return 0;
+}
+EXPORT_SYMBOL(tegra_dc_set_mode);
+
+static irqreturn_t tegra_dc_irq(int irq, void *ptr)
+{
+	struct tegra_dc *dc = ptr;
+	unsigned long status;
+	unsigned long flags;
+	unsigned long val;
+	int i;
+
+
+	status = tegra_dc_readl(dc, DC_CMD_INT_STATUS);
+	tegra_dc_writel(dc, status, DC_CMD_INT_STATUS);
+
+	if (status & FRAME_END_INT) {
+		int completed = 0;
+		int dirty = 0;
+
+		spin_lock_irqsave(&dc->lock, flags);
+		val = tegra_dc_readl(dc, DC_CMD_STATE_CONTROL);
+		for (i = 0; i < DC_N_WINDOWS; i++) {
+			if (!(val & (WIN_A_ACT_REQ << i))) {
+				dc->windows[i].dirty = 0;
+				completed = 1;
+			} else {
+				dirty = 1;
+			}
+		}
+
+		if (!dirty) {
+			val = tegra_dc_readl(dc, DC_CMD_INT_ENABLE);
+			val &= ~FRAME_END_INT;
+			tegra_dc_writel(dc, val, DC_CMD_INT_ENABLE);
+		}
+
+		spin_unlock_irqrestore(&dc->lock, flags);
+
+		if (completed)
+			wake_up(&dc->wq);
+	}
+
+	return IRQ_HANDLED;
+}
+static int tegra_dc_probe(struct platform_device *pdev)
+{
+	struct tegra_dc *dc;
+	struct clk *clk;
+	struct clk *host1x_clk;
+	struct resource	*res;
+	struct resource *base_res;
+	int ret = 0;
+	void __iomem *base;
+	int irq;
+	int i;
+
+	if (!pdev->dev.platform_data) {
+		dev_err(&pdev->dev, "no platform data\n");
+		return -ENOENT;
+	}
+
+	dc = kzalloc(sizeof(struct tegra_dc), GFP_KERNEL);
+	if (!dc) {
+		dev_err(&pdev->dev, "can't allocate memory for tegra_dc\n");
+		return -ENOMEM;
+	}
+
+	irq = platform_get_irq(pdev, 0);
+	if (irq <= 0) {
+		dev_err(&pdev->dev, "no irq\n");
+		ret = -ENOENT;
+		goto err_free;
+	}
+
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	if (!res) {
+		dev_err(&pdev->dev, "no mem resource\n");
+		ret = -ENOENT;
+		goto err_free;
+	}
+
+	base_res = request_mem_region(res->start, resource_size(res), pdev->name);
+	if (!base_res) {
+		dev_err(&pdev->dev, "request_mem_region failed\n");
+		ret = -EBUSY;
+		goto err_free;
+	}
+
+	base = ioremap(res->start, resource_size(res));
+	if (!base) {
+		dev_err(&pdev->dev, "registers can't be mapped\n");
+		ret = -EBUSY;
+		goto err_release_resource_reg;
+	}
+
+	host1x_clk = clk_get(&pdev->dev, "host1x");
+	if (IS_ERR_OR_NULL(host1x_clk)) {
+		dev_err(&pdev->dev, "can't get host1x clock\n");
+		ret = -ENOENT;
+		goto err_iounmap_reg;
+	}
+	clk_enable(host1x_clk);
+
+	clk = clk_get(&pdev->dev, NULL);
+	if (IS_ERR_OR_NULL(clk)) {
+		dev_err(&pdev->dev, "can't get clock\n");
+		ret = -ENOENT;
+
+		goto err_put_host1x_clk;
+	}
+	clk_enable(clk);
+
+	dc->clk = clk;
+	dc->host1x_clk = host1x_clk;
+	dc->base_res = base_res;
+	dc->base = base;
+	dc->irq = irq;
+	dc->pdev = pdev;
+	dc->pdata = pdev->dev.platform_data;
+	spin_lock_init(&dc->lock);
+	init_waitqueue_head(&dc->wq);
+
+
+	dc->n_windows = DC_N_WINDOWS;
+	for (i = 0; i < dc->n_windows; i++) {
+		dc->windows[i].idx = i;
+		dc->windows[i].dc = dc;
+	}
+
+	if (request_irq(irq, tegra_dc_irq, IRQF_DISABLED,
+			dev_name(&pdev->dev), dc)) {
+		dev_err(&pdev->dev, "request_irq %d failed\n", irq);
+		ret = -EBUSY;
+		goto err_put_clk;
+	}
+
+	ret = tegra_dc_add(dc, pdev->id);
+	if (ret < 0) {
+		dev_err(&pdev->dev, "can't add dc\n");
+		goto err_free_irq;
+	}
+
+	tegra_dc_set_blending(dc, tegra_dc_blend_modes[0]);
+
+	if (dc->pdata->flags & TEGRA_DC_FLAG_ENABLED) {
+
+		if (dc->pdata->default_out &&
+		    dc->pdata->default_out->n_modes > 0) {
+			dc->out = dc->pdata->default_out;
+			tegra_dc_set_mode(dc, &dc->out->modes[0]);
+		} else {
+			dev_err(&pdev->dev, "No default modes specified.  Leaving output disabled.\n");
+		}
+
+	}
+
+	dev_info(&pdev->dev, "probed\n");
+
+	return 0;
+
+err_free_irq:
+	free_irq(irq, dc);
+err_put_clk:
+	clk_disable(clk);
+	clk_put(clk);
+err_put_host1x_clk:
+	clk_disable(host1x_clk);
+	clk_put(host1x_clk);
+err_iounmap_reg:
+	iounmap(base);
+err_release_resource_reg:
+	release_resource(base_res);
+err_free:
+	kfree(dc);
+
+	return ret;
+}
+
+static int tegra_dc_remove(struct platform_device *pdev)
+{
+	return 0;
+}
+
+struct platform_driver tegra_dc_driver = {
+	.probe = tegra_dc_probe,
+	.remove = tegra_dc_remove,
+	.driver = {
+		.name = "tegradc",
+		.owner = THIS_MODULE,
+	},
+};
+
+static int __init tegra_dc_init(void)
+{
+	return platform_driver_register(&tegra_dc_driver);
+}
+
+static void __exit tegra_dc_exit(void)
+{
+	platform_driver_unregister(&tegra_dc_driver);
+}
+
+module_exit(tegra_dc_exit);
+module_init(tegra_dc_init);
