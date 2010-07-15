@@ -45,6 +45,9 @@ static int dvfs_set_rate(struct dvfs *d, unsigned long rate)
 {
 	struct dvfs_table *t;
 
+	if (unlikely(!d->reg))
+		return 0;
+
 	for (t = d->table; t->rate != 0; t++) {
 		if (rate <= t->rate) {
 			regulator_set_voltage(d->reg, t->millivolts * 1000,
@@ -72,9 +75,12 @@ static void dvfs_init(struct clk *c)
 		return;
 	}
 
-	for (i = 0; i < c->dvfs->process_id_table_length; i++)
-		if (process_id == c->dvfs->process_id_table[i].process_id)
+	for (i = 0; i < c->dvfs->process_id_table_length; i++) {
+		if (process_id == c->dvfs->process_id_table[i].process_id) {
 			c->dvfs->table = c->dvfs->process_id_table[i].table;
+			break;
+		}
+	}
 
 	if (i == c->dvfs->process_id_table_length) {
 		pr_err("Failed to find dvfs table for clock %s process %d\n",
