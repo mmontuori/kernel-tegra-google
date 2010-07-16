@@ -37,6 +37,7 @@
 #define PERIPH_EMC_ENB		(1 << 11)
 #define PERIPH_MANUAL_RESET	(1 << 12)
 #define PLL_ALT_MISC_REG	(1 << 13)
+#define PLLU			(1 << 14)
 #define ENABLE_ON_INIT		(1 << 28)
 
 struct clk;
@@ -54,9 +55,11 @@ struct dvfs_process_id_table {
 
 
 struct dvfs {
-	int process_id_table_length;
-	struct dvfs_table *table;
 	struct regulator *reg;
+	struct dvfs_table *table;
+	int max_millivolts;
+
+	int process_id_table_length;
 	const char *reg_id;
 	bool cpu;
 	struct dvfs_process_id_table process_id_table[];
@@ -80,12 +83,9 @@ struct clk_ops {
 	void		(*init)(struct clk *);
 	int		(*enable)(struct clk *);
 	void		(*disable)(struct clk *);
-	void		(*recalc)(struct clk *);
 	int		(*set_parent)(struct clk *, struct clk *);
 	int		(*set_rate)(struct clk *, unsigned long);
-	unsigned long	(*get_rate)(struct clk *);
 	long		(*round_rate)(struct clk *, unsigned long);
-	unsigned long	(*recalculate_rate)(struct clk *, int mul, int div);
 };
 
 enum clk_state {
@@ -126,10 +126,6 @@ struct clk {
 	unsigned long			cf_max;
 	unsigned long			vco_min;
 	unsigned long			vco_max;
-	u32				m;
-	u32				n;
-	u32				p;
-	u32				cpcon;
 	const struct clk_pll_table	*pll_table;
 
 	/* DIV */
