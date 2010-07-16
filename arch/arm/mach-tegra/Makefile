@@ -34,3 +34,7 @@ obj-${CONFIG_MACH_HARMONY}              += board-harmony-sdhci.o
 obj-${CONFIG_MACH_VENTANA}              += board-ventana.o
 obj-${CONFIG_MACH_VENTANA}              += board-ventana-pinmux.o
 obj-${CONFIG_MACH_VENTANA}              += board-ventana-sdhci.o
+
+ifneq (,$(filter y,$(CONFIG_MACH_VENTANA) $(CONFIG_MACH_HARMONY)))
+obj-y                                   += board-adb.o
+endif
