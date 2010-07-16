@@ -154,7 +154,7 @@ static struct platform_device debug_uart = {
 };
 
 /* OTG gadget device */
-static u64 tegra_otg_dmamask = DMA_BIT_MASK(32);
+static u64 tegra_usb_dmamask = DMA_BIT_MASK(32);
 
 
 static struct resource tegra_otg_resources[] = {
@@ -179,13 +179,40 @@ static struct platform_device tegra_otg = {
 	.name = "fsl-tegra-udc",
 	.id   = -1,
 	.dev  = {
-		.dma_mask		= &tegra_otg_dmamask,
+		.dma_mask		= &tegra_usb_dmamask,
 		.coherent_dma_mask	= 0xffffffff,
 		.platform_data = &tegra_otg_pdata,
 	},
 	.resource = tegra_otg_resources,
 	.num_resources = ARRAY_SIZE(tegra_otg_resources),
 };
+
+/* USB host ports */
+
+static struct resource tegra_usb3_resources[] = {
+	[0] = {
+		.start  = TEGRA_USB3_BASE,
+		.end    = TEGRA_USB3_BASE + TEGRA_USB3_SIZE - 1,
+		.flags  = IORESOURCE_MEM,
+	},
+	[1] = {
+		.start  = INT_USB3,
+		.end    = INT_USB3,
+		.flags  = IORESOURCE_IRQ,
+	},
+};
+
+struct platform_device tegra_usb3 = {
+	.name = "tegra-ehci",
+	.id   = 2,
+	.dev  = {
+		.dma_mask		= &tegra_usb_dmamask,
+		.coherent_dma_mask	= 0xffffffff,
+	},
+	.resource = tegra_usb3_resources,
+	.num_resources = ARRAY_SIZE(tegra_usb3_resources),
+};
+
 
 /* PDA power */
 static struct pda_power_pdata pda_power_pdata = {
@@ -225,6 +252,7 @@ static struct platform_device *harmony_devices[] __initdata = {
 	&debug_uart,
 	&tegra_nand_device,
 	&tegra_otg,
+	&tegra_usb3,
 	&pda_power_device,
 	&tegra_i2c_device1,
 	&tegra_i2c_device2,
