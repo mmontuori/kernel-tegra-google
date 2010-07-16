@@ -30,6 +30,7 @@ void __init tegra_map_common_io(void);
 void __init tegra_init_irq(void);
 void __init tegra_init_clock(void);
 void __init tegra_init_suspend(struct tegra_suspend_platform_data *plat);
+void __init tegra_androidusb_init(const char *name);
 
 extern struct sys_timer tegra_timer;
 #endif

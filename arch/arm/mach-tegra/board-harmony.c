@@ -258,13 +258,12 @@ static __initdata struct tegra_clk_init_table harmony_clk_init_table[] = {
 static void __init tegra_harmony_init(void)
 {
 	tegra_common_init();
-
 	tegra_clk_init_from_table(harmony_clk_init_table);
-
 	harmony_pinmux_init();
 
 	platform_add_devices(harmony_devices, ARRAY_SIZE(harmony_devices));
 
+	tegra_androidusb_init("Harmony!");
 	harmony_panel_init();
 	harmony_sdhci_init();
 }
