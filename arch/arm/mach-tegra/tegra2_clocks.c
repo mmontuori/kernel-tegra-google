@@ -1610,6 +1610,8 @@ struct clk tegra_periph_clks[] = {
 	PERIPH_CLK("usb3",	"tegra-ehci.2",		NULL,	59,	0,	480000000, mux_clk_m,			0), /* requires min voltage */
 	PERIPH_CLK("emc",	"emc",			NULL,	57,	0x19c,	800000000, mux_pllm_pllc_pllp_clkm,	MUX | DIV_U71 | PERIPH_EMC_ENB),
 	PERIPH_CLK("dsi",	"dsi",			NULL,	48,	0,	500000000, mux_plld,			0), /* scales with voltage */
+	PERIPH_CLK("csi",	"csi",			NULL,	52,	0,	72000000,  mux_pllp_out3,		0),
+	PERIPH_CLK("isp",	"isp",			NULL,	23,	0,	150000000, mux_clk_m,			0), /* same frequency as VI */
 };
 
 #define CLK_DUPLICATE(_name, _dev, _con)		\
