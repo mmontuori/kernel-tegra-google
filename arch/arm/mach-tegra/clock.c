@@ -25,6 +25,7 @@
 #include <linux/slab.h>
 #include <linux/seq_file.h>
 #include <linux/regulator/consumer.h>
+#include <linux/suspend.h>
 #include <asm/clkdev.h>
 
 #include "clock.h"
@@ -504,9 +505,47 @@ void tegra_periph_reset_assert(struct clk *c)
 }
 EXPORT_SYMBOL(tegra_periph_reset_assert);
 
+static int clk_prevents_suspend(void)
+{
+	struct clk *c;
+	unsigned long flags;
+	int ret = 0;
+
+	spin_lock_irqsave(&clock_lock, flags);
+
+	list_for_each_entry(c, &clocks, node) {
+		if ((c->flags & PREVENT_SUSPEND) && c->refcnt > 0) {
+			pr_warning("clock %s enabled, preventing suspend\n",
+				c->name);
+			ret = -EINVAL;
+			goto out;
+		}
+	}
+
+
+out:
+	spin_unlock_irqrestore(&clock_lock, flags);
+	return ret;
+}
+
+static int clk_suspend_notifier(struct notifier_block *nb,
+					unsigned long event, void *dummy)
+{
+	if (event == PM_SUSPEND_PREPARE)
+		if (clk_prevents_suspend())
+			return NOTIFY_BAD;
+
+	return NOTIFY_OK;
+}
+
+static struct notifier_block clk_suspend_notifier_block = {
+	.notifier_call = clk_suspend_notifier,
+};
+
 void __init tegra_init_clock(void)
 {
 	tegra2_init_clocks();
+	register_pm_notifier(&clk_suspend_notifier_block);
 }
 
 int __init tegra_init_dvfs(void)
