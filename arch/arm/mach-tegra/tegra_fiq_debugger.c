@@ -30,7 +30,7 @@
 
 #include <linux/uaccess.h>
 
-#include "legacy_irq.h"
+#include <mach/legacy_irq.h>
 
 #define UART_THR_DLAB	0x00
 #define UART_IER_DLAB	0x04
