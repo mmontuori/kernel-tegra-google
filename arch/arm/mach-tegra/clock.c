@@ -51,7 +51,7 @@ static int dvfs_set_rate(struct dvfs *d, unsigned long rate)
 	for (t = d->table; t->rate != 0; t++) {
 		if (rate <= t->rate) {
 			if (d->reg)
-				regulator_set_voltage(d->reg,
+				return regulator_set_voltage(d->reg,
 					t->millivolts * 1000,
 					d->max_millivolts * 1000);
 			return 0;
