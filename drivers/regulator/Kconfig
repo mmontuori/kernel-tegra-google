@@ -195,6 +195,13 @@ config REGULATOR_TPS6507X
 	  three step-down converters and two general-purpose LDO voltage regulators.
 	  It supports TI's software based Class-2 SmartReflex implementation.
 
+config REGULATOR_TPS658621
+	tristate "TI TPS658621 Power regulators"
+	depends on I2C
+	help
+	 This driver supports TPS658621 voltage regulator chips. TPS658621 provides
+	 three step-down converters and ten general-purpose LDO voltage regulators.
+
 config REGULATOR_88PM8607
 	bool "Marvell 88PM8607 Power regulators"
 	depends on MFD_88PM860X=y
