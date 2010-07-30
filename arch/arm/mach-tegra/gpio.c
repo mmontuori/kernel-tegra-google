@@ -144,7 +144,7 @@ static struct gpio_chip tegra_gpio_chip = {
 	.direction_output	= tegra_gpio_direction_output,
 	.set			= tegra_gpio_set,
 	.base			= 0,
-	.ngpio			= ARCH_NR_GPIOS,
+	.ngpio			= TEGRA_NR_GPIOS,
 };
 
 static void tegra_gpio_irq_ack(unsigned int irq)
@@ -281,7 +281,7 @@ void tegra_gpio_resume(void)
 
 	local_irq_restore(flags);
 
-	for (i=INT_GPIO_BASE; i<(INT_GPIO_BASE+ARCH_NR_GPIOS); i++) {
+	for (i=INT_GPIO_BASE; i<(INT_GPIO_BASE+TEGRA_NR_GPIOS); i++) {
 		struct irq_desc *desc = irq_to_desc(i);
 		if (!desc || (desc->status & IRQ_WAKEUP)) continue;
 		enable_irq(i);
@@ -294,7 +294,7 @@ void tegra_gpio_suspend(void)
 	int b, p, i;
 
 
-	for (i=INT_GPIO_BASE; i<(INT_GPIO_BASE+ARCH_NR_GPIOS); i++) {
+	for (i=INT_GPIO_BASE; i<(INT_GPIO_BASE+TEGRA_NR_GPIOS); i++) {
 		struct irq_desc *desc = irq_to_desc(i);
 		if (!desc) continue;
 		if (desc->status & IRQ_WAKEUP) {
@@ -361,7 +361,7 @@ static int __init tegra_gpio_init(void)
 
 	gpiochip_add(&tegra_gpio_chip);
 
-	for (i = INT_GPIO_BASE; i < (INT_GPIO_BASE + ARCH_NR_GPIOS); i++) {
+	for (i = INT_GPIO_BASE; i < (INT_GPIO_BASE + TEGRA_NR_GPIOS); i++) {
 		bank = &tegra_gpio_banks[GPIO_BANK(irq_to_gpio(i))];
 
 		lockdep_set_class(&irq_desc[i].lock, &gpio_lock_class);
