@@ -325,6 +325,8 @@ static int spi_tegra_start_transfer(struct spi_device *spi,
 	else
 		val |= IDLE_SCLK_DRIVE_LOW;
 
+	val |= M_S;
+
 	spi_writel(tspi, val, SLINK_COMMAND);
 
 	spi_writel(tspi, RX_FLUSH | TX_FLUSH, SLINK_STATUS);
@@ -518,6 +520,7 @@ static int __init spi_tegra_probe(struct platform_device *pdev)
 	tspi = spi_master_get_devdata(master);
 	tspi->master = master;
 	tspi->pdev = pdev;
+	spin_lock_init(&tspi->lock);
 
 	r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (r == NULL) {

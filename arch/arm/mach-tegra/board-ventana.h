@@ -1,11 +1,7 @@
 /*
- * arch/arm/mach-tegra/include/mach/memory.h
+ * arch/arm/mach-tegra/board-ventana.h
  *
  * Copyright (C) 2010 Google, Inc.
- *
- * Author:
- *	Colin Cross <ccross@google.com>
- *	Erik Gilling <konkers@google.com>
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -18,14 +14,11 @@
  *
  */
 
-#ifndef __MACH_TEGRA_MEMORY_H
-#define __MACH_TEGRA_MEMORY_H
+#ifndef _MACH_TEGRA_BOARD_VENTANA_H
+#define _MACH_TEGRA_BOARD_VENTANA_H
 
-/* physical offset of RAM */
-#define PHYS_OFFSET		UL(0)
-
-#define NET_IP_ALIGN	0
-#define NET_SKB_PAD	L1_CACHE_BYTES
+int ventana_regulator_init(void);
+int ventana_sdhci_init(void);
+int ventana_pinmux_init(void);
 
 #endif
-
