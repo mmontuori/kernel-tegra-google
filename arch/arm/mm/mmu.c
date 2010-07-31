@@ -247,7 +247,10 @@ static struct mem_type mem_types[] = {
 		.domain    = DOMAIN_USER,
 	},
 	[MT_MEMORY] = {
+		.prot_pte  = L_PTE_PRESENT | L_PTE_YOUNG | L_PTE_DIRTY |
+				L_PTE_EXEC,
 		.prot_sect = PMD_TYPE_SECT | PMD_SECT_AP_WRITE,
+		.prot_l1   = PMD_TYPE_TABLE,
 		.domain    = DOMAIN_KERNEL,
 	},
 	[MT_ROM] = {
@@ -463,6 +466,7 @@ static void __init build_mem_type_table(void)
 	mem_types[MT_LOW_VECTORS].prot_l1 |= ecc_mask;
 	mem_types[MT_HIGH_VECTORS].prot_l1 |= ecc_mask;
 	mem_types[MT_MEMORY].prot_sect |= ecc_mask | cp->pmd;
+	mem_types[MT_MEMORY].prot_pte |= pgprot_kernel;
 	mem_types[MT_ROM].prot_sect |= cp->pmd;
 
 	switch (cp->pmd) {
@@ -505,6 +509,30 @@ static void __init alloc_init_pte(pmd_t *pmd, unsigned long addr,
 		pfn++;
 	} while (pte++, addr += PAGE_SIZE, addr != end);
 }
+
+#ifdef CONFIG_ARCH_LOWMEM_IN_PTES
+static void __init realloc_init_pte(pmd_t *pmd, unsigned long addr,
+				    unsigned long end, unsigned long pfn,
+				    const struct mem_type *type)
+{
+	pte_t *pte, *ptep;
+
+	if ((pmd_val(*pmd) & PMD_TYPE_MASK) != PMD_TYPE_SECT)
+		return;
+
+	pte = alloc_bootmem_low_pages(2 * PTRS_PER_PTE * sizeof(pte_t));
+	if (WARN_ON(!pte))
+		return;
+
+	ptep = pte + PTRS_PER_PTE + __pte_index(addr);
+	do {
+		set_pte_ext(ptep, pfn_pte(pfn, __pgprot(type->prot_pte)), 0);
+		pfn++;
+	} while (ptep++, addr += PAGE_SIZE, addr != end);
+
+	__pmd_populate(pmd, __pa(pte) | type->prot_l1);
+}
+#endif
 
 static void __init alloc_init_section(pgd_t *pgd, unsigned long addr,
 				      unsigned long end, unsigned long phys,
@@ -1045,6 +1073,40 @@ static void __init map_lowmem(void)
 	}
 }
 
+static void __init remap_lowmem(void)
+{
+#ifdef CONFIG_ARCH_LOWMEM_IN_PTES
+	struct meminfo *mi = &meminfo;
+	const struct mem_type *type = &mem_types[MT_MEMORY];
+	int i;
+
+	for (i = 0; i < mi->nr_banks; i++) {
+		pgd_t *pgd;
+		unsigned long phys, addr, end;
+		struct membank *bank = &mi->bank[i];
+
+		if (bank->highmem)
+			continue;
+
+		phys = __pfn_to_phys(bank_pfn_start(bank));
+		addr = __phys_to_virt(bank_phys_start(bank));
+		end = addr + bank_phys_size(bank);
+
+		pgd = pgd_offset_k(addr);
+		do {
+			unsigned long next = pgd_addr_end(addr, end);
+			pmd_t *pmd = pmd_offset(pgd, addr);
+
+			realloc_init_pte(pmd, addr, next,
+					 __phys_to_pfn(phys), type);
+
+			phys += next - addr;
+			addr = next;
+		} while (pgd++, addr != end);
+	}
+#endif
+}
+
 static int __init meminfo_cmp(const void *_a, const void *_b)
 {
 	const struct membank *a = _a, *b = _b;
@@ -1067,6 +1129,7 @@ void __init paging_init(struct machine_desc *mdesc)
 	prepare_page_table();
 	map_lowmem();
 	bootmem_init();
+	remap_lowmem();
 	devicemaps_init(mdesc);
 	kmap_init();
 
