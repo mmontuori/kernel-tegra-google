@@ -39,7 +39,7 @@ static irqreturn_t carddetect_irq(int irq, void *data)
 {
 	struct sdhci_host *sdhost = (struct sdhci_host *)data;
 
-	sdhci_card_detect_callback(sdhost);
+	tasklet_schedule(&sdhost->card_tasklet);
 	return IRQ_HANDLED;
 };
 
@@ -110,17 +110,7 @@ static int __devinit tegra_sdhci_probe(struct platform_device *pdev)
 	sdhci->ioaddr = ioaddr;
 	sdhci->version = SDHCI_SPEC_200;
 	sdhci->quirks = SDHCI_QUIRK_BROKEN_TIMEOUT_VAL |
-			SDHCI_QUIRK_SINGLE_POWER_WRITE |
-			SDHCI_QUIRK_ENABLE_INTERRUPT_AT_BLOCK_GAP |
-			SDHCI_QUIRK_BROKEN_WRITE_PROTECT |
-			SDHCI_QUIRK_BROKEN_CTRL_HISPD |
-			SDHCI_QUIRK_8_BIT_DATA |
-			SDHCI_QUIRK_NO_VERSION_REG |
-			SDHCI_QUIRK_BROKEN_ADMA_ZEROLEN_DESC |
-			SDHCI_QUIRK_NO_SDIO_IRQ;
-
-	if (plat->force_hs != 0)
-		sdhci->quirks |= SDHCI_QUIRK_FORCE_HIGH_SPEED_MODE;
+			SDHCI_QUIRK_SINGLE_POWER_WRITE;
 
 	rc = sdhci_add_host(sdhci);
 	if (rc)
