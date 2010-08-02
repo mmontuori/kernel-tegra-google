@@ -109,6 +109,7 @@ void *kmap_atomic_pfn(unsigned long pfn, enum km_type type)
 {
 	unsigned int idx;
 	unsigned long vaddr;
+	struct page *page = pfn_to_page(pfn);
 
 	pagefault_disable();
 
@@ -117,7 +118,7 @@ void *kmap_atomic_pfn(unsigned long pfn, enum km_type type)
 #ifdef CONFIG_DEBUG_HIGHMEM
 	BUG_ON(!pte_none(*(TOP_PTE(vaddr))));
 #endif
-	set_pte_ext(TOP_PTE(vaddr), pfn_pte(pfn, kmap_prot), 0);
+	set_pte_ext(TOP_PTE(vaddr), mk_pte(page, kmap_prot), 0);
 	local_flush_tlb_kernel_page(vaddr);
 
 	return (void *)vaddr;

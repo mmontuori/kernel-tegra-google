@@ -153,6 +153,15 @@ void copy_to_user_page(struct vm_area_struct *vma, struct page *page,
 
 void __flush_dcache_page(struct address_space *mapping, struct page *page)
 {
+	/* PageUncached is used to indicate that cache attribute flags
+	 * are stored with the page; cache maintenance may still be
+	 * required if the page is mapped inner-cacheable, outer
+	 * non-cacheable */
+	if (PageUncached(page) &&
+	    !(page_private(page) == L_PTE_MT_WRITEBACK ||
+	      page_private(page) == L_PTE_MT_WRITEALLOC ||
+	      page_private(page) == L_PTE_MT_DEV_CACHED))
+		return;
 	/*
 	 * Writeback any data associated with the kernel mapping of this
 	 * page.  This ensures that data in the physical page is mutually

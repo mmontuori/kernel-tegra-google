@@ -485,6 +485,12 @@ void ___dma_page_cpu_to_dev(struct page *page, unsigned long off,
 {
 	unsigned long paddr;
 
+	if (PageUncached(page) &&
+	    !(page_private(page) == L_PTE_MT_WRITEBACK ||
+	      page_private(page) == L_PTE_MT_WRITEALLOC ||
+	      page_private(page) == L_PTE_MT_DEV_CACHED))
+		return;
+
 	dma_cache_maint_page(page, off, size, dir, dmac_map_area);
 
 	paddr = page_to_phys(page) + off;
@@ -500,7 +506,15 @@ EXPORT_SYMBOL(___dma_page_cpu_to_dev);
 void ___dma_page_dev_to_cpu(struct page *page, unsigned long off,
 	size_t size, enum dma_data_direction dir)
 {
-	unsigned long paddr = page_to_phys(page) + off;
+	unsigned long paddr;
+
+	if (PageUncached(page) &&
+	    !(page_private(page) == L_PTE_MT_WRITEBACK ||
+	      page_private(page) == L_PTE_MT_WRITEALLOC ||
+	      page_private(page) == L_PTE_MT_DEV_CACHED))
+		return;
+
+	paddr = page_to_phys(page) + off;
 
 	/* FIXME: non-speculating: not required */
 	/* don't bother invalidating if DMA to device */

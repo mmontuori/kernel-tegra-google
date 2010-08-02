@@ -9,7 +9,19 @@
 #define PKMAP_NR(virt)		(((virt) - PKMAP_BASE) >> PAGE_SHIFT)
 #define PKMAP_ADDR(nr)		(PKMAP_BASE + ((nr) << PAGE_SHIFT))
 
+#ifndef CONFIG_ARM_ATTRIB_ALLOCATOR
 #define kmap_prot		PAGE_KERNEL
+#else
+static inline pgprot_t kmap_prot_of(struct page *page)
+{
+	if (PageUncached(page)) {
+		return __pgprot_modify(PAGE_KERNEL, L_PTE_MT_MASK,
+				       page->private);
+	} else
+		return PAGE_KERNEL;
+}
+#define kmap_prot		kmap_prot_of(page)
+#endif
 
 #define flush_cache_kmaps() \
 	do { \
