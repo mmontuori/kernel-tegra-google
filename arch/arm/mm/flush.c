@@ -160,7 +160,8 @@ void __flush_dcache_page(struct address_space *mapping, struct page *page)
 	if (PageUncached(page) &&
 	    !(page_private(page) == L_PTE_MT_WRITEBACK ||
 	      page_private(page) == L_PTE_MT_WRITEALLOC ||
-	      page_private(page) == L_PTE_MT_DEV_CACHED))
+	      page_private(page) == L_PTE_MT_DEV_CACHED ||
+	      page_private(page) == L_PTE_MT_INNER_WB))
 		return;
 	/*
 	 * Writeback any data associated with the kernel mapping of this

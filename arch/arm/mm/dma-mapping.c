@@ -488,16 +488,20 @@ void ___dma_page_cpu_to_dev(struct page *page, unsigned long off,
 	if (PageUncached(page) &&
 	    !(page_private(page) == L_PTE_MT_WRITEBACK ||
 	      page_private(page) == L_PTE_MT_WRITEALLOC ||
-	      page_private(page) == L_PTE_MT_DEV_CACHED))
+	      page_private(page) == L_PTE_MT_DEV_CACHED ||
+	      page_private(page) == L_PTE_MT_INNER_WB))
 		return;
 
 	dma_cache_maint_page(page, off, size, dir, dmac_map_area);
 
 	paddr = page_to_phys(page) + off;
-	if (dir == DMA_FROM_DEVICE) {
-		outer_inv_range(paddr, paddr + size);
-	} else {
-		outer_clean_range(paddr, paddr + size);
+
+	if (!PageUncached(page) || (page_private(page) != L_PTE_MT_INNER_WB)) {
+		if (dir == DMA_FROM_DEVICE) {
+			outer_inv_range(paddr, paddr + size);
+		} else {
+			outer_clean_range(paddr, paddr + size);
+		}
 	}
 	/* FIXME: non-speculating: flush on bidirectional mappings? */
 }
@@ -511,15 +515,18 @@ void ___dma_page_dev_to_cpu(struct page *page, unsigned long off,
 	if (PageUncached(page) &&
 	    !(page_private(page) == L_PTE_MT_WRITEBACK ||
 	      page_private(page) == L_PTE_MT_WRITEALLOC ||
-	      page_private(page) == L_PTE_MT_DEV_CACHED))
+	      page_private(page) == L_PTE_MT_DEV_CACHED ||
+	      page_private(page) == L_PTE_MT_INNER_WB))
 		return;
 
 	paddr = page_to_phys(page) + off;
 
 	/* FIXME: non-speculating: not required */
 	/* don't bother invalidating if DMA to device */
-	if (dir != DMA_TO_DEVICE)
-		outer_inv_range(paddr, paddr + size);
+	if (!PageUncached(page) || (page_private(page) != L_PTE_MT_INNER_WB)) {
+		if (dir != DMA_TO_DEVICE)
+			outer_inv_range(paddr, paddr + size);
+	}
 
 	dma_cache_maint_page(page, off, size, dir, dmac_unmap_area);
 }
