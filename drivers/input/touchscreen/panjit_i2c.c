@@ -24,6 +24,7 @@
 #include <linux/device.h>
 #include <linux/input.h>
 #include <linux/delay.h>
+#include <linux/earlysuspend.h>
 #include <linux/i2c.h>
 #include <linux/interrupt.h>
 #include <linux/gpio.h>
@@ -54,10 +55,16 @@
 
 #define DRIVER_NAME			"panjit_touch"
 
+#ifdef CONFIG_HAS_EARLYSUSPEND
+static void pj_early_suspend(struct early_suspend *h);
+static void pj_late_resume(struct early_suspend *h);
+#endif
+
 struct pj_data {
 	struct input_dev	*input_dev;
 	struct i2c_client	*client;
 	int			chipid;
+	struct early_suspend	early_suspend;
 };
 
 struct pj_event {
@@ -206,6 +213,12 @@ static int pj_probe(struct i2c_client *client,
 		goto fail_irq;
 	}
 
+#ifdef CONFIG_HAS_EARLYSUSPEND
+	touch->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 1;
+	touch->early_suspend.suspend = pj_early_suspend;
+	touch->early_suspend.resume = pj_late_resume;
+	register_early_suspend(&touch->early_suspend);
+#endif
 	dev_info(&client->dev, "%s: initialized\n", __func__);
 	return 0;
 
@@ -258,6 +271,26 @@ static int pj_resume(struct i2c_client *client)
 	enable_irq(touch->client->irq);
 }
 
+#ifdef CONFIG_HAS_EARLYSUSPEND
+static void pj_early_suspend(struct early_suspend *es)
+{
+	struct pj_data *touch;
+	touch = container_of(es, struct pj_data, early_suspend);
+
+	if (pj_suspend(touch->client, PMSG_SUSPEND) != 0)
+		dev_err(&touch->client->dev, "%s: failed\n", __func__);
+}
+
+static void pj_late_resume(struct early_suspend *es)
+{
+	struct pj_data *touch;
+	touch = container_of(es, struct pj_data, early_suspend);
+
+	if (pj_resume(touch->client) != 0)
+		dev_err(&touch->client->dev, "%s: failed\n", __func__);
+}
+#endif
+
 static int pj_remove(struct i2c_client *client)
 {
 	struct pj_data *touch = i2c_get_clientdata(client);
@@ -265,6 +298,9 @@ static int pj_remove(struct i2c_client *client)
 	if (!touch)
 		return -EINVAL;
 
+#ifdef CONFIG_HAS_EARLYSUSPEND
+	unregister_early_suspend(&touch->early_suspend);
+#endif
 	free_irq(touch->client->irq, touch);
 	input_unregister_device(touch->input_dev);
 	input_free_device(touch->input_dev);
@@ -280,8 +316,10 @@ static const struct i2c_device_id panjit_ts_id[] = {
 static struct i2c_driver panjit_driver = {
 	.probe		= pj_probe,
 	.remove		= pj_remove,
+#ifndef CONFIG_HAS_EARLYSUSPEND
 	.suspend	= pj_suspend,
 	.resume		= pj_resume,
+#endif
 	.id_table	= panjit_ts_id,
 	.driver		= {
 		.name	= DRIVER_NAME,
