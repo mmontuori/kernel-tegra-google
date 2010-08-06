@@ -35,11 +35,10 @@
 
 /*	.section ".cpuinit.text", "ax"*/
 
-#define CONTEXT_SIZE_WORDS_SHIFT 7
-#define CONTEXT_SIZE_WORDS (1<<CONTEXT_SIZE_WORDS_SHIFT)
+#define TTB_FLAGS 0x6A	@ IRGN_WBWA, OC_RGN_WBWA, S, NOS
 
 /*
- * spooled CPU context is 512B / CPU
+ * spooled CPU context is 1KB / CPU
  */
 #define CTX_SP		0
 #define CTX_CPSR	4
@@ -106,13 +105,34 @@
 #define CTX_VFP_REGS	256
 #define CTX_VFP_SIZE	(32 * 8)
 
+#define CTX_CP14_REGS	512
+#define CTS_CP14_DSCR	512
+#define CTX_CP14_WFAR	516
+#define CTX_CP14_VCR	520
+#define CTX_CP14_CLAIM	524
+
+/* Each of the folowing is 2 32-bit registers */
+#define CTS_CP14_BKPT_0	528
+#define CTS_CP14_BKPT_1	536
+#define CTS_CP14_BKPT_2	544
+#define CTS_CP14_BKPT_3	552
+#define CTS_CP14_BKPT_4	560
+#define CTS_CP14_BKPT_5	568
+
+/* Each of the folowing is 2 32-bit registers */
+#define CTS_CP14_WPT_0	576
+#define CTS_CP14_WPT_1	584
+#define CTS_CP14_WPT_2	592
+#define CTS_CP14_WPT_3	600
+
+#include "power.h"
 #include "power-macros.S"
 
 .macro	ctx_ptr, rd, tmp
 	cpu_id	\tmp
 	mov32	\rd, tegra_context_area
 	ldr	\rd, [\rd]
-	add	\rd, \rd, \tmp, lsl #(CONTEXT_SIZE_WORDS_SHIFT+2)
+	add	\rd, \rd, \tmp, lsl #(CONTEXT_SIZE_BYTES_SHIFT)
 .endm
 
 .macro	translate, pa, va, tmp
@@ -161,7 +181,7 @@ ENTRY(__cortex_a9_save)
 
 	/* zero-out context area */
 	mov	r9, r8
-	add	r10, r8, #(CONTEXT_SIZE_WORDS*4)
+	add	r10, r8, #(CONTEXT_SIZE_BYTES)
 	mov	r0, #0
 	mov	r1, #0
 	mov	r2, #0
@@ -249,6 +269,48 @@ ENTRY(__cortex_a9_save)
 	cps	0x13			@ back to SVC
 	mov	r8, r0
 
+	/* Save CP14 debug controller context */
+	add	r9, r8, #CTX_CP14_REGS
+	mrc     p14, 0, r0, c0, c1, 0	@ DSCR
+	mrc	p14, 0, r1, c0, c6, 0	@ WFAR
+	mrc	p14, 0, r2, c0, c7, 0	@ VCR
+	mrc	p14, 0, r3, c7, c9, 6	@ CLAIM
+	stmia	r9, {r0-r3}
+
+	add	r9, r8, #CTS_CP14_BKPT_0
+	mrc	p14, 0, r2, c0, c0, 4
+	mrc	p14, 0, r3, c0, c0, 5
+	stmia	r9!, {r2-r3}     	@ BRKPT_0
+	mrc	p14, 0, r2, c0, c1, 4
+	mrc	p14, 0, r3, c0, c1, 5
+	stmia	r9!, {r2-r3}     	@ BRKPT_0
+	mrc	p14, 0, r2, c0, c2, 4
+	mrc	p14, 0, r3, c0, c2, 5
+	stmia	r9!, {r2-r3}     	@ BRKPT_0
+	mrc	p14, 0, r2, c0, c3, 4
+	mrc	p14, 0, r3, c0, c3, 5
+	stmia	r9!, {r2-r3}     	@ BRKPT_0
+	mrc	p14, 0, r2, c0, c4, 4
+	mrc	p14, 0, r3, c0, c4, 5
+	stmia	r9!, {r2-r3}     	@ BRKPT_0
+	mrc	p14, 0, r2, c0, c5, 4
+	mrc	p14, 0, r3, c0, c5, 5
+	stmia	r9!, {r2-r3}     	@ BRKPT_0
+
+	add	r9, r8, #CTS_CP14_WPT_0
+	mrc	p14, 0, r2, c0, c0, 6
+	mrc	p14, 0, r3, c0, c0, 7
+	stmia	r9!, {r2-r3}     	@ WPT_0
+	mrc	p14, 0, r2, c0, c1, 6
+	mrc	p14, 0, r3, c0, c1, 7
+	stmia	r9!, {r2-r3}     	@ WPT_0
+	mrc	p14, 0, r2, c0, c2, 6
+	mrc	p14, 0, r3, c0, c2, 7
+	stmia	r9!, {r2-r3}     	@ WPT_0
+	mrc	p14, 0, r2, c0, c3, 6
+	mrc	p14, 0, r3, c0, c3, 7
+	stmia	r9!, {r2-r3}     	@ WPT_0
+
 #ifdef CONFIG_CACHE_L2X0
 	cpu_id	r4
 	cmp	r4, #0
@@ -266,7 +328,7 @@ ENTRY(__cortex_a9_save)
 
 __cortex_a9_save_clean_cache:
 	mov	r10, r8
-	add	r9, r10, #(CONTEXT_SIZE_WORDS*4)
+	add	r9, r10, #(CONTEXT_SIZE_BYTES)
 	add	r9, r9, #(L1_CACHE_BYTES-1)
 	bic	r10, r10, #(L1_CACHE_BYTES-1)
 	bic	r9, r9, #(L1_CACHE_BYTES-1)
@@ -387,6 +449,50 @@ ENTRY(__cortex_a9_restore)
 	msr	cpsr_cxsf, r6
 	msr	spsr_cxsf, r7
 
+	/* Restore CP14 debug controller context */
+	add	r9, r8, #CTX_CP14_REGS
+	ldmia	r9, {r0-r3}
+	mcr	p14, 0, r1, c0, c6, 0	@ WFAR
+	mcr	p14, 0, r2, c0, c7, 0	@ VCR
+	mcr	p14, 0, r3, c7, c8, 6	@ CLAIM
+
+	add	r9, r8, #CTS_CP14_BKPT_0
+	ldmia	r9!, {r2-r3}		@ BRKPT_0
+	mcr	p14, 0, r2, c0, c0, 4
+	mcr	p14, 0, r3, c0, c0, 5
+	ldmia	r9!, {r2-r3}		@ BRKPT_0
+	mcr	p14, 0, r2, c0, c1, 4
+	mcr	p14, 0, r3, c0, c1, 5
+	ldmia	r9!, {r2-r3}		@ BRKPT_0
+	mcr	p14, 0, r2, c0, c2, 4
+	mcr	p14, 0, r3, c0, c2, 5
+	ldmia	r9!, {r2-r3}		@ BRKPT_0
+	mcr	p14, 0, r2, c0, c3, 4
+	mcr	p14, 0, r3, c0, c3, 5
+	ldmia	r9!, {r2-r3}		@ BRKPT_0
+	mcr	p14, 0, r2, c0, c4, 4
+	mcr	p14, 0, r3, c0, c4, 5
+	ldmia	r9!, {r2-r3}		@ BRKPT_0
+	mcr	p14, 0, r2, c0, c5, 4
+	mcr	p14, 0, r3, c0, c5, 5
+
+	add	r9, r8, #CTS_CP14_WPT_0
+	ldmia	r9!, {r2-r3}		@ WPT_0
+	mcr	p14, 0, r2, c0, c0, 6
+	mcr	p14, 0, r3, c0, c0, 7
+	ldmia	r9!, {r2-r3}		@ WPT_0
+	mcr	p14, 0, r2, c0, c1, 6
+	mcr	p14, 0, r3, c0, c1, 7
+	ldmia	r9!, {r2-r3}		@ WPT_0
+	mcr	p14, 0, r2, c0, c2, 6
+	mcr	p14, 0, r3, c0, c2, 7
+	ldmia	r9!, {r2-r3}		@ WPT_0
+	mcr	p14, 0, r2, c0, c3, 6
+	mcr	p14, 0, r3, c0, c3, 7
+	isb
+	mcr	p14, 0, r0, c0, c2, 2	@ DSCR
+	isb
+
 #ifdef CONFIG_VFPv3
 	orr	r4, lr, #0xF00000
 	mcr	p15, 0, r4, c1, c0, 2	@ enable coproc access
@@ -456,3 +562,142 @@ ENTRY(__shut_off_mmu)
 	isb
 	bx	r9
 ENDPROC(__shut_off_mmu)
+
+/*
+ *	__invalidate_l1
+ *
+ *	  Invalidates the L1 data cache (no clean) during initial boot of
+ *	  a secondary processor
+ *
+ *	  Corrupted registers: r0-r6
+ */
+__invalidate_l1:
+	mov	r0, #0
+	mcr	p15, 2, r0, c0, c0, 0
+	mrc	p15, 1, r0, c0, c0, 0
+
+	movw	r1, #0x7fff
+	and	r2, r1, r0, lsr #13
+
+	movw	r1, #0x3ff
+
+	and	r3, r1, r0, lsr #3  @ NumWays - 1
+	add	r2, r2, #1	@ NumSets
+
+	and	r0, r0, #0x7
+	add	r0, r0, #4	@ SetShift
+
+	clz	r1, r3		@ WayShift
+	add	r4, r3, #1	@ NumWays
+1:	sub	r2, r2, #1	@ NumSets--
+	mov	r3, r4		@ Temp = NumWays
+2:	subs    r3, r3, #1	@ Temp--
+	mov	r5, r3, lsl r1
+	mov	r6, r2, lsl r0
+	orr	r5, r5, r6	@ Reg = (Temp<<WayShift)|(NumSets<<SetShift)
+	mcr	p15, 0, r5, c7, c6, 2
+	bgt	2b
+	cmp	r2, #0
+	bgt	1b
+	dsb
+	isb
+	bx	lr
+ENDPROC(__invalidate_l1)
+
+/*
+ *	__invalidate_cpu_state
+ *
+ *	 Invalidates volatile CPU state (SCU tags, caches, branch address
+ *	 arrays, exclusive monitor, etc.) so that they can be safely enabled
+ *	 instruction caching and branch predicition enabled as early as
+ *	 possible to improve performance
+ */
+ENTRY(__invalidate_cpu_state)
+	clrex
+	mov	r0, #0
+	mcr	p15, 0, r0, c1, c0, 1	@ disable SMP, prefetch, broadcast
+	isb
+	mcr	p15, 0, r0, c7, c5, 0	@ invalidate BTAC, i-cache
+	mcr	p15, 0, r0, c7, c5, 6	@ invalidate branch pred array
+	mcr	p15, 0, r0, c8, c7, 0	@ invalidate unified TLB
+	dsb
+	isb
+
+	cpu_id	r0
+	cmp	r0, #0
+	mov32	r1, (TEGRA_ARM_PERIF_BASE + 0xC)
+	movne	r0, r0, lsl #2
+	movne	r2, #0xf
+	movne	r2, r2, lsl r0
+	strne	r2, [r1]		@ invalidate SCU tags for CPU
+
+	dsb
+	mov	r0, #0x1800
+	mcr	p15, 0, r0, c1, c0, 0	@ enable branch prediction, i-cache
+	isb
+	b	__invalidate_l1		@ invalidate data cache
+ENDPROC(__invalidate_cpu_state)
+
+/*
+ *	__return_to_virtual(unsigned long pgdir, void (*ctx_restore)(void))
+ *
+ *	  Restores a CPU to the world of virtual addressing, using the
+ *	  specified page tables (which must ensure that a VA=PA mapping
+ *	  exists for the __enable_mmu function), and then jumps to
+ *	  ctx_restore to restore CPU context and return control to the OS
+ */
+	.align L1_CACHE_SHIFT
+ENTRY(__return_to_virtual)
+	orr	r8, r0, #TTB_FLAGS
+	mov	lr, r1			@ "return" to ctx_restore
+	mov	r3, #0
+	mcr	p15, 0, r3, c2, c0, 2	@ TTB control register
+
+	mcr	p15, 0, r8, c2, c0, 1	@ load TTBR1
+
+	mov	r0, #0x1f
+	mcr	p15, 0, r0, c3, c0, 0	@ domain access register
+
+	mov32	r0, 0xff0a89a8
+	mov32	r1, 0x40e044e0
+	mcr	p15, 0, r0, c10, c2, 0	@ PRRR
+	mcr	p15, 0, r1, c10, c2, 1	@ NMRR
+	mrc	p15, 0, r0, c1, c0, 0
+	mov32	r1, 0x0120c302
+	bic	r0, r0, r1
+	mov32	r1, 0x10c03c7d
+	orr	r0, r0, r1
+
+#ifdef CONFIG_ALIGNMENT_TRAP
+	orr	r0, r0, #0x2
+#else
+	bic	r0, r0, #0x2
+#endif
+	mov	r1, #(domain_val(DOMAIN_USER, DOMAIN_MANAGER) | \
+		      domain_val(DOMAIN_KERNEL, DOMAIN_MANAGER) | \
+		      domain_val(DOMAIN_TABLE, DOMAIN_MANAGER) | \
+		      domain_val(DOMAIN_IO, DOMAIN_CLIENT))
+	mcr	p15, 0, r1, c3, c0, 0	@ domain access register
+	mcr	p15, 0, r8, c2, c0, 0	@ TTBR0
+	b	__turn_mmu_on_again
+	andeq	r0, r0, r0
+	andeq	r0, r0, r0
+	andeq	r0, r0, r0
+	andeq	r0, r0, r0
+ENDPROC(__return_to_virtual)
+
+/*
+ *	__turn_mmu_on_again
+ *
+ *	  does exactly what it advertises: turns the MMU on, again
+ *	  jumps to the *virtual* address lr after the MMU is enabled.
+ */
+	.align	L1_CACHE_SHIFT
+__turn_mmu_on_again:
+	mov	r0, r0
+	mcr	p15, 0, r0, c1, c0, 0
+	mrc	p15, 0, r3, c0, c0, 0
+	mov	r3, r3
+	mov	r3, lr
+	bx	lr
+ENDPROC(__turn_mmu_on_again)
