@@ -20,6 +20,7 @@
 #ifndef __MACH_TEGRA_DC_H
 #define __MACH_TEGRA_DC_H
 
+#include <linux/pm.h>
 
 #define TEGRA_MAX_DC		2
 #define DC_N_WINDOWS		3
@@ -33,8 +34,8 @@ struct tegra_dc_blend {
 };
 
 #define BLEND(key, control, weight0, weight1)				\
-	CKEY_ ## key | BLEND_CONTROL_ ## control |			\
-	 BLEND_WEIGHT0(weight0) | BLEND_WEIGHT0(weight1)
+	(CKEY_ ## key | BLEND_CONTROL_ ## control |			\
+	 BLEND_WEIGHT0(weight0) | BLEND_WEIGHT0(weight1))
 
 struct tegra_dc_mode {
 	int	pclk;
@@ -62,6 +63,10 @@ struct tegra_dc_out {
 
 	struct tegra_dc_mode	*modes;
 	int			n_modes;
+
+	int	(*init)(void);
+	int	(*suspend)(pm_message_t state);
+	int	(*resume)(void);
 };
 
 #define TEGRA_DC_ALIGN_MSB		0
