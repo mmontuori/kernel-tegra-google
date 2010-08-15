@@ -31,6 +31,8 @@
 #include <mach/dc.h>
 #include <mach/fb.h>
 
+#define FB_STRIDE_ATOM 16
+
 struct tegra_fb_info {
 	struct tegra_dc_win	*win;
 	struct platform_device	*pdev;
@@ -40,6 +42,7 @@ struct tegra_fb_info {
 
 	int			xres;
 	int			yres;
+	int			pitch;
 
 	atomic_t		in_use;
 };
@@ -108,6 +111,8 @@ static int tegra_fb_set_par(struct fb_info *info)
 		return -EINVAL;
 	}
 	info->fix.line_length = var->xres * var->bits_per_pixel / 8;
+	info->fix.line_length = ALIGN(info->fix.line_length, FB_STRIDE_ATOM);
+	tegra_fb->win->stride = info->fix.line_length;
 
 	tegra_dc_update_windows(&tegra_fb->win, 1);
 
@@ -234,6 +239,8 @@ struct tegra_fb_info *tegra_fb_register(struct platform_device *pdev,
 	tegra_fb->fb_mem = fb_mem;
 	tegra_fb->xres = fb_data->xres;
 	tegra_fb->yres = fb_data->yres;
+	tegra_fb->pitch = fb_data->pitch;
+	WARN_ON(tegra_fb->pitch & (FB_STRIDE_ATOM-1));
 	atomic_set(&tegra_fb->in_use, 0);
 
 	info->fbops = &tegra_fb_ops;
