@@ -25,6 +25,16 @@
 #define TEGRA_MAX_DC		2
 #define DC_N_WINDOWS		3
 
+#define TEGRA_DC_PITCH_ATOM	16	/* in bytes */
+#define TEGRA_DC_TILED_ATOM	64	/* in bytes */
+#define TEGRA_DC_TILED_HEIGHT	16	/* in scanlines */
+
+enum tegra_win_layout {
+	TEGRA_WIN_LAYOUT_PITCH	= 0,
+	TEGRA_WIN_LAYOUT_TILED,
+	TEGRA_WIN_LAYOUT_LINEAR_TILED,
+};
+
 struct tegra_dc_blend {
 	u32	nokey;
 	u32	one_win;
@@ -88,8 +98,10 @@ struct tegra_dc_win {
 	unsigned		y;
 	unsigned		w;
 	unsigned		h;
+	unsigned		pitch;
 	unsigned		out_w;
 	unsigned		out_h;
+	enum tegra_win_layout	layout;
 
 	int			dirty;
 	struct tegra_dc		*dc;
@@ -153,5 +165,8 @@ int tegra_dc_sync_windows(struct tegra_dc_win *windows[], int n);
 void tegra_dc_set_blending(struct tegra_dc *dc, struct tegra_dc_blend *blend);
 
 int tegra_dc_set_mode(struct tegra_dc *dc, struct tegra_dc_mode *mode);
+
+unsigned int tegra_dc_compute_pitch(int xres, int bpp,
+				    enum tegra_win_layout layout);
 
 #endif

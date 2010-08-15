@@ -352,6 +352,35 @@ struct tegra_dc *tegra_dc_get_dc(unsigned idx)
 }
 EXPORT_SYMBOL(tegra_dc_get_dc);
 
+unsigned int tegra_dc_compute_pitch(int xres, int bpp,
+				    enum tegra_win_layout layout)
+{
+	unsigned int raw_pitch = (xres * bpp) / 8;
+	unsigned int k, n;
+
+	if (layout == TEGRA_WIN_LAYOUT_PITCH)
+		return ALIGN(raw_pitch, TEGRA_DC_PITCH_ATOM);
+	else if (layout == TEGRA_WIN_LAYOUT_TILED)
+		return ALIGN(raw_pitch, TEGRA_DC_TILED_ATOM);
+	else if (WARN_ON(layout != TEGRA_WIN_LAYOUT_LINEAR_TILED))
+		return raw_pitch;
+
+	/* tiled surfaces compatible with linear addressing must
+	 * satisfy (k * 2^n * TILED_ATOM), for n <= 6 and odd k <= 15 */
+	k = DIV_ROUND_UP(raw_pitch, TEGRA_DC_TILED_ATOM);
+	n = min(__ffs(k), 6);
+
+	k >>= n;
+	if (!(k & 1))
+		k++;
+
+	if (WARN_ON(k > 15))
+		return TEGRA_DC_TILED_ATOM;
+
+	return (k << n) * TEGRA_DC_TILED_ATOM;
+}
+EXPORT_SYMBOL(tegra_dc_compute_pitch);
+
 struct tegra_dc_win *tegra_dc_get_window(struct tegra_dc *dc, unsigned win)
 {
 	if (win >= dc->n_windows)
@@ -375,8 +404,10 @@ int tegra_dc_update_windows(struct tegra_dc_win *windows[], int n)
 	spin_lock_irqsave(&dc->lock, flags);
 	for (i = 0; i < n; i++) {
 		struct tegra_dc_win *win = windows[i];
+		unsigned bpp = tegra_dc_fmt_bpp(win->fmt);
 		unsigned h_dda;
 		unsigned v_dda;
+		unsigned pitch;
 		unsigned stride;
 
 		tegra_dc_writel(dc, WINDOW_A_SELECT << win->idx,
@@ -392,7 +423,15 @@ int tegra_dc_update_windows(struct tegra_dc_win *windows[], int n)
 		tegra_dc_writel(dc, win->fmt, DC_WIN_COLOR_DEPTH);
 		tegra_dc_writel(dc, 0, DC_WIN_BYTE_SWAP);
 
-		stride = win->w * tegra_dc_fmt_bpp(win->fmt) / 8;
+		stride = win->w * bpp / 8;
+
+		WARN_ON(win->layout != TEGRA_WIN_LAYOUT_PITCH);
+
+		if (WARN_ON(!win->pitch))
+			win->pitch = tegra_dc_compute_pitch(win->x, bpp,
+							    win->layout);
+
+		pitch = win->pitch;
 
 		/* TODO: implement filter on settings */
 		h_dda = (win->w * 0x1000) / (win->out_w - 1);
@@ -412,7 +451,7 @@ int tegra_dc_update_windows(struct tegra_dc_win *windows[], int n)
 		tegra_dc_writel(dc, 0, DC_WIN_V_INITIAL_DDA);
 		tegra_dc_writel(dc, V_DDA_INC(v_dda) | H_DDA_INC(h_dda),
 				DC_WIN_DDA_INCREMENT);
-		tegra_dc_writel(dc, stride, DC_WIN_LINE_STRIDE);
+		tegra_dc_writel(dc, pitch, DC_WIN_LINE_STRIDE);
 		tegra_dc_writel(dc, 0, DC_WIN_BUF_STRIDE);
 
 		val = WIN_ENABLE;

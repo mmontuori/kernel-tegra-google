@@ -40,6 +40,7 @@ struct tegra_fb_info {
 
 	int			xres;
 	int			yres;
+	int			pitch;
 
 	atomic_t		in_use;
 };
@@ -107,7 +108,12 @@ static int tegra_fb_set_par(struct fb_info *info)
 	default:
 		return -EINVAL;
 	}
-	info->fix.line_length = var->xres * var->bits_per_pixel / 8;
+
+	tegra_fb->win->layout = TEGRA_WIN_LAYOUT_PITCH;
+	tegra_fb->win->pitch = tegra_dc_compute_pitch(var->xres,
+						      var->bits_per_pixel,
+                                                      TEGRA_WIN_LAYOUT_PITCH);
+	info->fix.line_length = tegra_fb->win->pitch;
 
 	tegra_dc_update_windows(&tegra_fb->win, 1);
 
