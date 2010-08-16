@@ -22,7 +22,9 @@ void tegra_serial_debug_init(unsigned int base, int irq,
 	struct clk *clk, int signal_irq, int wakeup_irq);
 #else
 static inline void tegra_serial_debug_init(unsigned int base, int irq,
-	struct clk *clk, int signal_irq, int wakeup_irq);
+	struct clk *clk, int signal_irq, int wakeup_irq)
+{
+}
 #endif
 
 #endif
