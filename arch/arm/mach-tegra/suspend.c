@@ -43,6 +43,7 @@
 #include <mach/iomap.h>
 #include <mach/iovmm.h>
 #include <mach/irqs.h>
+#include <mach/suspend.h>
 
 #include "power.h"
 
@@ -78,6 +79,7 @@ static void __iomem *tmrus = IO_ADDRESS(TEGRA_TMRUS_BASE);
 #define PMC_WAKE_DELAY		0xe0
 #define PMC_DPD_SAMPLE  	0x20
 
+#define PMC_WAKE_STATUS		0x14
 #define PMC_SW_WAKE_STATUS	0x18
 #define PMC_COREPWRGOOD_TIMER	0x3c
 #define PMC_SCRATCH0		0x50
@@ -264,13 +266,80 @@ static void pmc_32kwritel(u32 val, unsigned long offs)
 	udelay(130);
 }
 
+static void tegra_log_wake_sources(void)
+{
+	int wake;
+	int irq;
+	struct irq_desc *desc;
+
+	unsigned long wake_status = readl(pmc + PMC_WAKE_STATUS);
+	for_each_set_bit(wake, &wake_status, sizeof(wake_status) * 8) {
+		irq = tegra_wake_to_irq(wake);
+		if (!irq) {
+			pr_info("Resume caused by WAKE%d\n", wake);
+			continue;
+		}
+
+		desc = irq_to_desc(irq);
+		if (!desc || !desc->action || !desc->action->name) {
+			pr_info("Resume caused by WAKE%d, irq %d\n", wake, irq);
+			continue;
+		}
+
+		pr_info("Resume caused by WAKE%d, %s\n", wake,
+			desc->action->name);
+	}
+}
+
 static void tegra_setup_wakepads(bool do_lp0)
 {
 	u32 temp, status, lvl;
+	int irq;
+	struct irq_desc *desc;
+	unsigned long wake_enb = pdata->wake_enb;
+	unsigned long wake_any = pdata->wake_any;
+	unsigned long wake_high = pdata->wake_high;
+	unsigned long wake_low = pdata->wake_low;
+	int wake_bit;
 
 	/* wakeup by interrupt, nothing to do here */
 	if (!do_lp0)
 		return;
+
+	for_each_irq_desc(irq, desc) {
+		if (!(desc->status & IRQ_WAKEUP))
+			continue;
+
+		wake_bit = tegra_irq_to_wake(irq);
+		if (wake_bit < 0) {
+			pr_warn("Can't set IRQ %d as wake interrupt\n", irq);
+			continue;
+		}
+
+		switch (desc->status & IRQ_TYPE_SENSE_MASK) {
+		case IRQ_TYPE_NONE:
+		case IRQ_TYPE_LEVEL_HIGH:
+		case IRQ_TYPE_EDGE_RISING:
+			wake_high |= 1 << wake_bit;
+			break;
+		case IRQ_TYPE_LEVEL_LOW:
+		case IRQ_TYPE_EDGE_FALLING:
+			wake_low |= 1 << wake_bit;
+			break;
+		case IRQ_TYPE_EDGE_BOTH:
+			wake_any |= 1 << wake_bit;
+			break;
+		default:
+			pr_warn("Unsupported wake IRQ type %d on irq %d\n",
+				desc->status & IRQ_TYPE_SENSE_MASK, irq);
+			continue;
+		}
+
+		wake_enb |= 1 << wake_bit;
+		pr_info("Set irq %d (%s) as WAKE%d\n", irq,
+			(desc && desc->action && desc->action->name) ? desc->action->name : "unknown",
+				wake_bit);
+	}
 
 	pmc_32kwritel(0, PMC_SW_WAKE_STATUS);
 	temp = readl(pmc + PMC_CTRL);
@@ -283,9 +352,9 @@ static void tegra_setup_wakepads(bool do_lp0)
 
 	/* flip the wakeup trigger for any-edge triggered pads
 	 * which are currently asserting as wakeups */
-	status &= pdata->wake_any;
-	lvl &= ~pdata->wake_low;
-	lvl |= pdata->wake_high;
+	status &= wake_any;
+	lvl &= ~wake_low;
+	lvl |= wake_high;
 	lvl ^= status;
 
 	writel(lvl, pmc + PMC_WAKE_LEVEL);
@@ -293,12 +362,8 @@ static void tegra_setup_wakepads(bool do_lp0)
 	 * in which pad will be driven during lp0 mode*/
 	writel(0x1, pmc + PMC_DPD_SAMPLE);
 
-	writel(pdata->wake_enb, pmc + PMC_WAKE_MASK);
-
+	writel(wake_enb, pmc + PMC_WAKE_MASK);
 }
-
-extern void __tegra_lp1_reset(void);
-extern void __tegra_iram_end(void);
 
 static u8 *iram_save = NULL;
 static unsigned int iram_save_size = 0;
@@ -482,20 +547,6 @@ static void tegra_debug_uart_resume(void)
 }
 #endif
 
-extern void __init lp0_suspend_init(void);
-
-extern void tegra_pinmux_suspend(void);
-extern void tegra_irq_suspend(void);
-extern void tegra_gpio_suspend(void);
-extern void tegra_clk_suspend(void);
-extern void tegra_dma_suspend(void);
-
-extern void tegra_pinmux_resume(void);
-extern void tegra_irq_resume(void);
-extern void tegra_gpio_resume(void);
-extern void tegra_clk_resume(void);
-extern void tegra_dma_resume(void);
-
 #define MC_SECURITY_START	0x6c
 #define MC_SECURITY_SIZE	0x70
 
@@ -554,6 +605,7 @@ static int tegra_suspend_enter(suspend_state_t state)
 		tegra_dma_resume();
 		tegra_irq_resume();
 		tegra_debug_uart_resume();
+		tegra_log_wake_sources();
 	}
 
 	local_irq_restore(flags);

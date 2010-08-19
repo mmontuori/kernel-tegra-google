@@ -28,6 +28,7 @@
 #include <asm/clkdev.h>
 
 #include <mach/iomap.h>
+#include <mach/suspend.h>
 
 #include "clock.h"
 #include "fuse.h"
@@ -1239,10 +1240,21 @@ static struct clk tegra_pll_a_out0 = {
 };
 
 static struct clk_pll_table tegra_pll_d_table[] = {
+	{ 12000000, 216000000, 216, 12, 1, 4},
+	{ 13000000, 216000000, 216, 13, 1, 4},
+	{ 19200000, 216000000, 135, 12, 1, 3},
+	{ 26000000, 216000000, 216, 26, 1, 4},
+
+	{ 12000000, 594000000, 594, 12, 1, 8},
+	{ 13000000, 594000000, 594, 13, 1, 8},
+	{ 19200000, 594000000, 495, 16, 1, 8},
+	{ 26000000, 594000000, 594, 26, 1, 8},
+
 	{ 12000000, 1000000000, 1000, 12, 1, 12},
 	{ 13000000, 1000000000, 1000, 13, 1, 12},
 	{ 19200000, 1000000000, 625,  12, 1, 8},
 	{ 26000000, 1000000000, 1000, 26, 1, 12},
+
 	{ 0, 0, 0, 0, 0, 0 },
 };
 
@@ -1654,8 +1666,8 @@ struct clk tegra_periph_clks[] = {
 	PERIPH_CLK("3d",	"3d",			NULL,	24,	0x158,	300000000, mux_pllm_pllc_pllp_plla,	MUX | DIV_U71 | PERIPH_MANUAL_RESET), /* scales with voltage and process_id */
 	PERIPH_CLK("2d",	"2d",			NULL,	21,	0x15c,	300000000, mux_pllm_pllc_pllp_plla,	MUX | DIV_U71), /* scales with voltage and process_id */
 	/* FIXME: vi and vi_sensor share an enable */
-	PERIPH_CLK("vi",	"vi",			NULL,	20,	0x148,	150000000, mux_pllm_pllc_pllp_plla,	MUX | DIV_U71), /* scales with voltage and process_id */
-	PERIPH_CLK("vi_sensor",	"vi_sensor",		NULL,	20,	0x1a8,	150000000, mux_pllm_pllc_pllp_plla,	MUX | DIV_U71 | PERIPH_NO_RESET), /* scales with voltage and process_id */
+	PERIPH_CLK("vi",	"tegra_camera",		"vi",	20,	0x148,	150000000, mux_pllm_pllc_pllp_plla,	MUX | DIV_U71), /* scales with voltage and process_id */
+	PERIPH_CLK("vi_sensor",	"tegra_camera",		"vi_sensor",	20,	0x1a8,	150000000, mux_pllm_pllc_pllp_plla,	MUX | DIV_U71 | PERIPH_NO_RESET), /* scales with voltage and process_id */
 	PERIPH_CLK("epp",	"epp",			NULL,	19,	0x16c,	300000000, mux_pllm_pllc_pllp_plla,	MUX | DIV_U71), /* scales with voltage and process_id */
 	PERIPH_CLK("mpe",	"mpe",			NULL,	60,	0x170,	250000000, mux_pllm_pllc_pllp_plla,	MUX | DIV_U71), /* scales with voltage and process_id */
 	PERIPH_CLK("host1x",	"host1x",		NULL,	28,	0x180,	166000000, mux_pllm_pllc_pllp_plla,	MUX | DIV_U71), /* scales with voltage and process_id */
@@ -1671,9 +1683,9 @@ struct clk tegra_periph_clks[] = {
 	PERIPH_CLK("usb3",	"tegra-ehci.2",		NULL,	59,	0,	480000000, mux_clk_m,			0), /* requires min voltage */
 	PERIPH_CLK("emc",	"emc",			NULL,	57,	0x19c,	800000000, mux_pllm_pllc_pllp_clkm,	MUX | DIV_U71 | PERIPH_EMC_ENB),
 	PERIPH_CLK("dsi",	"dsi",			NULL,	48,	0,	500000000, mux_plld,			0), /* scales with voltage */
-	PERIPH_CLK("csi",	"csi",			NULL,	52,	0,	72000000,  mux_pllp_out3,		0),
-	PERIPH_CLK("isp",	"isp",			NULL,	23,	0,	150000000, mux_clk_m,			0), /* same frequency as VI */
-	PERIPH_CLK("csus",	"csus",			NULL,	92,	0,	150000000, mux_clk_m,			PERIPH_NO_RESET),
+	PERIPH_CLK("csi",	"tegra_camera",		"csi",	52,	0,	72000000,  mux_pllp_out3,		0),
+	PERIPH_CLK("isp",	"tegra_camera",		"isp",	23,	0,	150000000, mux_clk_m,			0), /* same frequency as VI */
+	PERIPH_CLK("csus",	"tegra_camera",		"csus",	92,	0,	150000000, mux_clk_m,			PERIPH_NO_RESET),
 };
 
 #define CLK_DUPLICATE(_name, _dev, _con)		\
@@ -1780,6 +1792,7 @@ static u32 clk_rst_suspend[RST_DEVICES_NUM + CLK_OUT_ENB_NUM +
 void tegra_clk_suspend(void)
 {
 	unsigned long off, i;
+	u32 pllx_misc;
 	u32 *ctx = clk_rst_suspend;
 
 	*ctx++ = clk_readl(OSC_CTRL) & OSC_CTRL_MASK;
@@ -1807,6 +1820,10 @@ void tegra_clk_suspend(void)
 
 	*ctx++ = clk_readl(MISC_CLK_ENB);
 	*ctx++ = clk_readl(CLK_MASK_ARM);
+
+	pllx_misc = clk_readl(tegra_pll_x.reg + PLL_MISC(&tegra_pll_x));
+	pllx_misc &= ~PLL_MISC_LOCK_ENABLE(&tegra_pll_x);
+	clk_writel(pllx_misc, tegra_pll_x.reg + PLL_MISC(&tegra_pll_x));
 }
 
 void tegra_clk_resume(void)
