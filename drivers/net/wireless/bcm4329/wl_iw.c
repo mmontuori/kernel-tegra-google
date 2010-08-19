@@ -667,14 +667,20 @@ wl_iw_set_power_mode(
 
 		dev_wlc_ioctl(dev, WLC_GET_PM, &pm, sizeof(pm));
 		dev_wlc_ioctl(dev, WLC_SET_PM, &pm_local, sizeof(pm_local));
-	}
-	else if (strnicmp((char *)&powermode_val, "0", strlen("0")) == 0) {
+
+		/* Disable packet filtering if necessary */
+		net_os_set_packet_filter(dev, 0);
+
+	} else if (strnicmp((char *)&powermode_val, "0", strlen("0")) == 0) {
 
 		WL_TRACE(("%s: DHCP session done\n", __FUNCTION__));
 
 		dev_wlc_ioctl(dev, WLC_SET_PM, &pm, sizeof(pm));
-	}
-	else {
+
+		/* Enable packet filtering if was turned off */
+		net_os_set_packet_filter(dev, 1);
+
+	} else {
 		WL_ERROR(("Unkwown yet power setting, ignored\n"));
 	}
 
@@ -849,9 +855,18 @@ wl_iw_set_suspend(
 )
 {
 	int suspend_flag;
+	int ret;
 
 	suspend_flag = *(extra + strlen("SETSUSPEND") + 1) - '0';
-	return net_os_set_suspend_disable(dev, suspend_flag);
+	if (suspend_flag != 0)
+		suspend_flag = 1;
+
+	ret = net_os_set_suspend_disable(dev, suspend_flag);
+	WL_TRACE(("%s: Suspend Flag %d -> %d\n", __func__, ret, suspend_flag));
+
+	if (ret != suspend_flag)
+		net_os_set_suspend(dev, ret);
+	return 0;
 }
 
 int
