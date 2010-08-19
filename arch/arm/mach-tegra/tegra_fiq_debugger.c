@@ -59,13 +59,16 @@ static void debug_port_init(void)
 {
 	if (tegra_read(UART_LSR) & 1)
 		(void)tegra_read(UART_THR_DLAB);
-	tegra_write(1, UART_IER_DLAB); /* enable rx interrupt only */
+	tegra_write(5, UART_IER_DLAB); /* enable rx and lsr interrupt */
 	tegra_write(0, UART_FIFO_IIR); /* interrupt on every character */
 }
 
 static int debug_getc(void)
 {
-	if (tegra_read(UART_LSR) & 1)
+	unsigned int lsr = tegra_read(UART_LSR);
+	if (lsr & 0x10)
+		return 0x100;
+	else if (lsr & 1)
 		return tegra_read(UART_THR_DLAB);
 	else
 		return -1;
