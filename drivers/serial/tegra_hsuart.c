@@ -428,7 +428,7 @@ static void tegra_tx_dma_complete_callback(struct tegra_dma_req *req)
 				"timed out waiting for TX FIFO to empty\n");
 			return;
 		}
-		msleep(1);
+		udelay(1);
 	}
 
 	spin_lock_irqsave(&t->uport.lock, flags);
