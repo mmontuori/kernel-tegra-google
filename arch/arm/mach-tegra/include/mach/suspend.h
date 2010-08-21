@@ -41,4 +41,11 @@ void tegra_dma_resume(void);
 int tegra_irq_to_wake(int irq);
 int tegra_wake_to_irq(int wake);
 
+int tegra_set_lp0_wake(int irq, int enable);
+int tegra_set_lp0_wake_type(int irq, int flow_type);
+int tegra_set_lp1_wake(int irq, int enable);
+bool tegra_can_enter_lp0(void);
+void tegra_set_lp0_wake_pads(u32 wake_enb, u32 wake_level, u32 wake_any);
+void tegra_irq_handle_wake(void);
+
 #endif /* _MACH_TEGRA_SUSPEND_H_ */
