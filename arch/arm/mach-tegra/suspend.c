@@ -475,7 +475,6 @@ static void tegra_suspend_wake(void)
 	enable_irq(INT_SYS_STATS_MON);
 }
 
-#ifdef CONFIG_DEBUG_LL
 static u8 uart_state[5];
 
 static int tegra_debug_uart_suspend(void)
@@ -536,16 +535,6 @@ static void tegra_debug_uart_resume(void)
 
 	writeb(lcr, uart + UART_LCR * 4);
 }
-#else
-static int tegra_debug_uart_suspend(void)
-{
-	return 0;
-}
-
-static void tegra_debug_uart_resume(void)
-{
-}
-#endif
 
 #define MC_SECURITY_START	0x6c
 #define MC_SECURITY_SIZE	0x70
@@ -558,13 +547,24 @@ static int tegra_suspend_enter(suspend_state_t state)
 	u32 mc_data[2];
 	int irq;
 	bool do_lp0 = pdata->core_off && (wb0_restore != 0);
+	bool do_lp2 = !pdata->dram_suspend || !iram_save;
+	int lp_state;
+
+	if (do_lp2)
+		lp_state = 2;
+	else if (do_lp0)
+		lp_state = 0;
+	else
+		lp_state = 1;
 
 	local_irq_save(flags);
 
+	pr_info("Entering suspend state LP%d\n", lp_state);
+
 	if (do_lp0) {
-		tegra_debug_uart_suspend();
 		tegra_irq_suspend();
 		tegra_dma_suspend();
+		tegra_debug_uart_suspend();
 		tegra_pinmux_suspend();
 		tegra_gpio_suspend();
 		tegra_clk_suspend();
@@ -580,7 +580,7 @@ static int tegra_suspend_enter(suspend_state_t state)
 		}
 	}
 
-	if (!pdata->dram_suspend || !iram_save)
+	if (do_lp2)
 		tegra_suspend_lp2(0);
 	else
 		tegra_suspend_dram(do_lp0);
@@ -602,9 +602,9 @@ static int tegra_suspend_enter(suspend_state_t state)
 		tegra_clk_resume();
 		tegra_gpio_resume();
 		tegra_pinmux_resume();
+		tegra_debug_uart_resume();
 		tegra_dma_resume();
 		tegra_irq_resume();
-		tegra_debug_uart_resume();
 		tegra_log_wake_sources();
 	}
 

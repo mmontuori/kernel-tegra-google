@@ -183,14 +183,43 @@ static void nuke(struct fsl_ep *ep, int status)
 	Internal Hardware related function
  ------------------------------------------------------------------*/
 
+#define FSL_UDC_RESET_TIMEOUT 1000
+static int dr_controller_reset(struct fsl_udc *udc)
+{
+	unsigned int tmp;
+	unsigned long timeout;
+
+	/* Stop and reset the usb controller */
+	tmp = fsl_readl(&dr_regs->usbcmd);
+	tmp &= ~USB_CMD_RUN_STOP;
+	fsl_writel(tmp, &dr_regs->usbcmd);
+
+	tmp = fsl_readl(&dr_regs->usbcmd);
+	tmp |= USB_CMD_CTRL_RESET;
+	fsl_writel(tmp, &dr_regs->usbcmd);
+
+	/* Wait for reset to complete */
+	timeout = jiffies + FSL_UDC_RESET_TIMEOUT;
+	while (fsl_readl(&dr_regs->usbcmd) & USB_CMD_CTRL_RESET) {
+		if (time_after(jiffies, timeout)) {
+			ERR("udc reset timeout!\n");
+			return -ETIMEDOUT;
+		}
+		cpu_relax();
+	}
+	return 0;
+}
+
 static int dr_controller_setup(struct fsl_udc *udc)
 {
 	unsigned int tmp, portctrl;
 #if !defined(CONFIG_ARCH_MXC) && !defined(CONFIG_ARCH_TEGRA)
 	unsigned int ctrl;
 #endif
+#ifdef CONFIG_ARCH_TEGRA
 	unsigned long timeout;
-#define FSL_UDC_RESET_TIMEOUT 1000
+#endif
+	int status;
 
 	/* Config PHY interface */
 	portctrl = fsl_readl(&dr_regs->portsc1);
@@ -213,24 +242,9 @@ static int dr_controller_setup(struct fsl_udc *udc)
 	}
 	fsl_writel(portctrl, &dr_regs->portsc1);
 
-	/* Stop and reset the usb controller */
-	tmp = fsl_readl(&dr_regs->usbcmd);
-	tmp &= ~USB_CMD_RUN_STOP;
-	fsl_writel(tmp, &dr_regs->usbcmd);
-
-	tmp = fsl_readl(&dr_regs->usbcmd);
-	tmp |= USB_CMD_CTRL_RESET;
-	fsl_writel(tmp, &dr_regs->usbcmd);
-
-	/* Wait for reset to complete */
-	timeout = jiffies + FSL_UDC_RESET_TIMEOUT;
-	while (fsl_readl(&dr_regs->usbcmd) & USB_CMD_CTRL_RESET) {
-		if (time_after(jiffies, timeout)) {
-			ERR("udc reset timeout!\n");
-			return -ETIMEDOUT;
-		}
-		cpu_relax();
-	}
+	status = dr_controller_reset(udc);
+	if (status)
+		return status;
 
 	/* Set the controller as device mode */
 	tmp = fsl_readl(&dr_regs->usbmode);
@@ -1805,16 +1819,17 @@ static irqreturn_t fsl_udc_irq(int irq, void *_udc)
 				reset_queues(udc);
 				/* stop the controller and turn off the clocks */
 				dr_controller_stop(udc);
+				dr_controller_reset(udc);
 				fsl_udc_clk_suspend();
 				udc->vbus_active = 0;
 				udc->usb_state = USB_STATE_DEFAULT;
 			} else {
 				spin_unlock_irqrestore(&udc->lock, flags);
-				return IRQ_HANDLED;
+				return IRQ_NONE;
 			}
 		} else {
 			spin_unlock_irqrestore(&udc->lock, flags);
-			return IRQ_HANDLED;
+			return IRQ_NONE;
 		}
 	}
 #endif
@@ -1951,14 +1966,14 @@ int usb_gadget_register_driver(struct usb_gadget_driver *driver)
 		goto out;
 	}
 
-	if (udc_controller->transceiver)
-		otg_set_peripheral(udc_controller->transceiver, &udc_controller->gadget);
-
 	/* Enable DR IRQ reg and Set usbcmd reg  Run bit */
-	dr_controller_run(udc_controller);
-	udc_controller->usb_state = USB_STATE_ATTACHED;
-	udc_controller->ep0_state = WAIT_FOR_SETUP;
-	udc_controller->ep0_dir = 0;
+	if (!udc_controller->transceiver) {
+		dr_controller_run(udc_controller);
+		udc_controller->usb_state = USB_STATE_ATTACHED;
+		udc_controller->ep0_state = WAIT_FOR_SETUP;
+		udc_controller->ep0_dir = 0;
+	}
+
 	printk(KERN_INFO "%s: bind to driver %s\n",
 			udc_controller->gadget.name, driver->driver.name);
 
@@ -1981,9 +1996,6 @@ int usb_gadget_unregister_driver(struct usb_gadget_driver *driver)
 
 	if (!driver || driver != udc_controller->driver || !driver->unbind)
 		return -EINVAL;
-
-	if (udc_controller->transceiver)
-		otg_set_peripheral(udc_controller->transceiver, NULL);
 
 	/* stop DR, disable intr */
 	dr_controller_stop(udc_controller);
@@ -2560,8 +2572,14 @@ static int __init fsl_udc_probe(struct platform_device *pdev)
 
 #ifdef CONFIG_USB_OTG_UTILS
 	udc_controller->transceiver = otg_get_transceiver();
-	if (udc_controller->transceiver)
-		udc_controller->vbus_active = 1;
+	if (udc_controller->transceiver) {
+		dr_controller_stop(udc_controller);
+		dr_controller_reset(udc_controller);
+		fsl_udc_clk_suspend();
+		udc_controller->vbus_active = 0;
+		udc_controller->usb_state = USB_STATE_DEFAULT;
+		otg_set_peripheral(udc_controller->transceiver, &udc_controller->gadget);
+	}
 #else
 #ifdef CONFIG_ARCH_TEGRA
 	/* Power down the phy if cable is not connected */
@@ -2600,6 +2618,9 @@ static int __exit fsl_udc_remove(struct platform_device *pdev)
 	if (!udc_controller)
 		return -ENODEV;
 	udc_controller->done = &done;
+
+	if (udc_controller->transceiver)
+		otg_set_peripheral(udc_controller->transceiver, NULL);
 
 	fsl_udc_clk_release();
 
