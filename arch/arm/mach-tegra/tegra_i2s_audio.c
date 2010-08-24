@@ -36,7 +36,10 @@
 #include <linux/debugfs.h>
 #include <linux/completion.h>
 #include <linux/platform_device.h>
+#include <linux/device.h>
 #include <linux/io.h>
+#include <linux/ktime.h>
+#include <linux/sysfs.h>
 
 #include <linux/tegra_audio.h>
 
@@ -50,34 +53,25 @@
 
 
 /* per stream (input/output) */
-struct audio_out_stream {
+struct audio_stream {
 	int opened;
 	struct mutex lock;
 
+	struct tegra_audio_buf_config buf_config;
 	bool active; /* is DMA or PIO in progress? */
 	void *buffer;
 	dma_addr_t buf_phys;
 	struct kfifo fifo;
 	struct completion fifo_completion;
 
+	unsigned errors;
+
+	int i2s_fifo_atn_level;
+
+	ktime_t last_dma_ts;
 	struct tegra_dma_channel *dma_chan;
-	spinlock_t dma_req_lock; /* guards active and dma_has_it */
-	int dma_has_it;
-	struct tegra_dma_req dma_req;
-};
-
-struct audio_in_stream {
-	int opened;
-	struct mutex lock;
-
-	bool active; /* is DMA or PIO in progress? */
-	void *buffer;
-	dma_addr_t buf_phys;
-	struct kfifo fifo;
-	struct completion fifo_completion;
-
-	struct tegra_dma_channel *dma_chan;
-	spinlock_t dma_req_lock; /* guards active and dma_has_it */
+	struct completion stop_completion;
+	spinlock_t dma_req_lock; /* guards dma_has_it */
 	int dma_has_it;
 	struct tegra_dma_req dma_req;
 };
@@ -115,17 +109,45 @@ struct audio_driver_state {
 	int in_divs_len;
 
 	struct miscdevice misc_out;
-	struct audio_out_stream out;
+	struct miscdevice misc_out_ctl;
+	struct audio_stream out;
 
 	struct miscdevice misc_in;
-	struct audio_in_stream in;
+	struct miscdevice misc_in_ctl;
+	struct audio_stream in;
 };
+
+static inline int buf_size(struct audio_stream *s)
+{
+	return 1 << s->buf_config.size;
+}
+
+static inline int chunk_size(struct audio_stream *s)
+{
+	return 1 << s->buf_config.chunk;
+}
+
+static inline int threshold_size(struct audio_stream *s)
+{
+	return 1 << s->buf_config.threshold;
+}
 
 static inline struct audio_driver_state *ads_from_misc_out(struct file *file)
 {
 	struct miscdevice *m = file->private_data;
 	struct audio_driver_state *ads =
 			container_of(m, struct audio_driver_state, misc_out);
+	BUG_ON(!ads);
+	return ads;
+}
+
+static inline struct audio_driver_state *ads_from_misc_out_ctl(
+		struct file *file)
+{
+	struct miscdevice *m = file->private_data;
+	struct audio_driver_state *ads =
+			container_of(m, struct audio_driver_state,
+					misc_out_ctl);
 	BUG_ON(!ads);
 	return ads;
 }
@@ -139,14 +161,25 @@ static inline struct audio_driver_state *ads_from_misc_in(struct file *file)
 	return ads;
 }
 
+static inline struct audio_driver_state *ads_from_misc_in_ctl(
+		struct file *file)
+{
+	struct miscdevice *m = file->private_data;
+	struct audio_driver_state *ads =
+			container_of(m, struct audio_driver_state,
+					misc_in_ctl);
+	BUG_ON(!ads);
+	return ads;
+}
+
 static inline struct audio_driver_state *ads_from_out(
-			struct audio_out_stream *aos)
+			struct audio_stream *aos)
 {
 	return container_of(aos, struct audio_driver_state, out);
 }
 
 static inline struct audio_driver_state *ads_from_in(
-			struct audio_in_stream *ais)
+			struct audio_stream *ais)
 {
 	return container_of(ais, struct audio_driver_state, in);
 }
@@ -431,39 +464,37 @@ static inline u32 i2s_get_fifo_full_empty_count(unsigned long base, int fifo)
 	return val & I2S_I2S_FIFO_SCR_FIFO_FULL_EMPTY_COUNT_MASK;
 }
 
-/* FIXME: add an ioctl to report the buffer sizes */
+#define PCM_IN_BUFFER_PADDING		(1<<6) /* bytes */
+#define PCM_BUFFER_MAX_SIZE_ORDER	(PAGE_SHIFT + 2)
+#define PCM_BUFFER_DMA_CHUNK_SIZE_ORDER	(PCM_BUFFER_MAX_SIZE_ORDER - 1)
+#define PCM_BUFFER_THRESHOLD_ORDER	PCM_BUFFER_DMA_CHUNK_SIZE_ORDER
+#define PCM_DMA_CHUNK_MIN_SIZE_ORDER	3
 
-#define PCM_OUT_BUFFER_SIZE	(PAGE_SIZE*4)
-#define PCM_OUT_DMA_CHUNK	(PAGE_SIZE)
-#define PCM_OUT_THRESHOLD	(PAGE_SIZE*2)
-
-#define PCM_IN_BUFFER_SIZE	(PAGE_SIZE*4)
-#define PCM_IN_BUFFER_PADDING	256
-#define PCM_IN_DMA_CHUNK	(PAGE_SIZE)
-#define PCM_IN_THRESHOLD	(PAGE_SIZE*2)
+static int init_stream_buffer(struct audio_stream *,
+		struct tegra_audio_buf_config *cfg, unsigned);
 
 static int setup_dma(struct audio_driver_state *);
 static void tear_down_dma(struct audio_driver_state *);
-static int start_dma_playback(struct audio_out_stream *);
-static void stop_dma_playback(struct audio_out_stream *);
-static int start_dma_recording(struct audio_in_stream *);
-static int resume_dma_recording(struct audio_in_stream *);
-static void stop_dma_recording(struct audio_in_stream *);
+static int start_dma_playback(struct audio_stream *);
+static void stop_dma_playback(struct audio_stream *);
+static int start_dma_recording(struct audio_stream *);
+static int resume_dma_recording(struct audio_stream *);
+static void stop_dma_recording(struct audio_stream *);
 
 static int setup_pio(struct audio_driver_state *);
 static void tear_down_pio(struct audio_driver_state *);
-static int start_pio_playback(struct audio_out_stream *);
-static void stop_pio_playback(struct audio_out_stream *);
-static int start_pio_recording(struct audio_in_stream *);
-static void stop_pio_recording(struct audio_in_stream *);
+static int start_pio_playback(struct audio_stream *);
+static void stop_pio_playback(struct audio_stream *);
+static int start_pio_recording(struct audio_stream *);
+static void stop_pio_recording(struct audio_stream *);
 
 struct sound_ops {
 	int (*setup)(struct audio_driver_state *);
 	void (*tear_down)(struct audio_driver_state *);
-	int (*start_playback)(struct audio_out_stream *);
-	void (*stop_playback)(struct audio_out_stream *);
-	int (*start_recording)(struct audio_in_stream *);
-	void (*stop_recording)(struct audio_in_stream *);
+	int (*start_playback)(struct audio_stream *);
+	void (*stop_playback)(struct audio_stream *);
+	int (*start_recording)(struct audio_stream *);
+	void (*stop_recording)(struct audio_stream *);
 };
 
 static const struct sound_ops dma_sound_ops = {
@@ -486,37 +517,40 @@ static const struct sound_ops pio_sound_ops = {
 
 static const struct sound_ops *sound_ops = &dma_sound_ops;
 
-static void start_playback_if_necessary(struct audio_out_stream *aos)
+static int start_playback(struct audio_stream *aos)
 {
+	int rc;
 	unsigned long flags;
 	spin_lock_irqsave(&aos->dma_req_lock, flags);
-	if (!aos->active) {
-		pr_debug("%s: starting playback\n", __func__);
-		aos->active = !sound_ops->start_playback(aos);
-	} else
-		pr_debug("%s: playback already started\n", __func__);
+	pr_debug("%s: starting playback\n", __func__);
+	rc = sound_ops->start_playback(aos);
 	spin_unlock_irqrestore(&aos->dma_req_lock, flags);
+	return rc;
 }
 
-static void start_recording_if_necessary(struct audio_in_stream *ais)
+static int start_recording_if_necessary(struct audio_stream *ais)
 {
+	int rc = 0;
 	unsigned long flags;
+	struct audio_driver_state *ads = ads_from_in(ais);
+
 	spin_lock_irqsave(&ais->dma_req_lock, flags);
-	if (!ais->active) {
-		pr_info("%s: starting recording\n", __func__);
-		ais->active = !sound_ops->start_recording(ais);
-	} else
-		pr_debug("%s: recording already started\n", __func__);
+	if (!ads->recording_cancelled && !kfifo_is_full(&ais->fifo)) {
+		pr_debug("%s: starting recording\n", __func__);
+		rc = sound_ops->start_recording(ais);
+	}
 	spin_unlock_irqrestore(&ais->dma_req_lock, flags);
+	return rc;
 }
 
-static bool stop_playback_if_necessary(struct audio_out_stream *aos)
+static bool stop_playback_if_necessary(struct audio_stream *aos)
 {
 	unsigned long flags;
 	spin_lock_irqsave(&aos->dma_req_lock, flags);
 	if (kfifo_is_empty(&aos->fifo)) {
 		sound_ops->stop_playback(aos);
-		aos->active = false;
+		if (aos->active)
+			aos->errors++;
 		spin_unlock_irqrestore(&aos->dma_req_lock, flags);
 		return true;
 	}
@@ -525,27 +559,28 @@ static bool stop_playback_if_necessary(struct audio_out_stream *aos)
 	return false;
 }
 
-static bool stop_recording_if_necessary_nosync(struct audio_in_stream *ais)
+static bool stop_recording_if_necessary_nosync(struct audio_stream *ais)
 {
 	struct audio_driver_state *ads = ads_from_in(ais);
 
 	if (ads->recording_cancelled || kfifo_is_full(&ais->fifo)) {
+		if (kfifo_is_full(&ais->fifo))
+			ais->errors++;
 		sound_ops->stop_recording(ais);
-		ais->active = false;
 		return true;
 	}
 
 	return false;
 }
 
-static bool stop_recording_if_necessary(struct audio_in_stream *ais)
+static bool stop_recording(struct audio_stream *ais)
 {
-	unsigned long flags;
-	bool ret;
-	spin_lock_irqsave(&ais->dma_req_lock, flags);
-	ret = stop_recording_if_necessary_nosync(ais);
-	spin_unlock_irqrestore(&ais->dma_req_lock, flags);
-	return ret;
+	int rc;
+	pr_debug("%s: wait for completion\n", __func__);
+	rc = wait_for_completion_interruptible(
+			&ais->stop_completion);
+	pr_debug("%s: done: %d\n", __func__, rc);
+	return true;
 }
 
 static void toggle_dma(struct audio_driver_state *ads)
@@ -559,13 +594,13 @@ static void toggle_dma(struct audio_driver_state *ads)
 
 /* DMA */
 
-static int resume_dma_playback(struct audio_out_stream *aos);
+static int resume_dma_playback(struct audio_stream *aos);
 
 static void setup_dma_tx_request(struct tegra_dma_req *req,
-		struct audio_out_stream *aos);
+		struct audio_stream *aos);
 
 static void setup_dma_rx_request(struct tegra_dma_req *req,
-		struct audio_in_stream *ais);
+		struct audio_stream *ais);
 
 static int setup_dma(struct audio_driver_state *ads)
 {
@@ -574,7 +609,7 @@ static int setup_dma(struct audio_driver_state *ads)
 
 	/* setup audio playback */
 	ads->out.buf_phys = dma_map_single(&ads->pdev->dev, ads->out.buffer,
-				PCM_OUT_BUFFER_SIZE, DMA_TO_DEVICE);
+				1 << PCM_BUFFER_MAX_SIZE_ORDER, DMA_TO_DEVICE);
 	BUG_ON(!ads->out.buf_phys);
 	setup_dma_tx_request(&ads->out.dma_req, &ads->out);
 	ads->out.dma_chan = tegra_dma_allocate_channel(TEGRA_DMA_MODE_ONESHOT);
@@ -587,7 +622,8 @@ static int setup_dma(struct audio_driver_state *ads)
 
 	/* setup audio recording */
 	ads->in.buf_phys = dma_map_single(&ads->pdev->dev, ads->in.buffer,
-				PCM_IN_BUFFER_SIZE, DMA_FROM_DEVICE);
+				1 << PCM_BUFFER_MAX_SIZE_ORDER,
+				DMA_FROM_DEVICE);
 	BUG_ON(!ads->in.buf_phys);
 	setup_dma_rx_request(&ads->in.dma_req, &ads->in);
 	ads->in.dma_chan = tegra_dma_allocate_channel(TEGRA_DMA_MODE_ONESHOT);
@@ -602,13 +638,13 @@ static int setup_dma(struct audio_driver_state *ads)
 
 fail_rx:
 	dma_unmap_single(&ads->pdev->dev, ads->in.buf_phys,
-			PCM_IN_BUFFER_SIZE, DMA_FROM_DEVICE);
+			1 << PCM_BUFFER_MAX_SIZE_ORDER, DMA_FROM_DEVICE);
 	tegra_dma_free_channel(ads->in.dma_chan);
 	ads->in.dma_chan = 0;
 
 fail_tx:
 	dma_unmap_single(&ads->pdev->dev, ads->out.buf_phys,
-			PCM_OUT_BUFFER_SIZE, DMA_TO_DEVICE);
+			1 << PCM_BUFFER_MAX_SIZE_ORDER, DMA_TO_DEVICE);
 	tegra_dma_free_channel(ads->out.dma_chan);
 	ads->out.dma_chan = 0;
 
@@ -622,14 +658,14 @@ static void tear_down_dma(struct audio_driver_state *ads)
 	tegra_dma_free_channel(ads->out.dma_chan);
 	ads->out.dma_chan = NULL;
 	dma_unmap_single(&ads->pdev->dev, ads->out.buf_phys,
-				PCM_OUT_BUFFER_SIZE,
+				buf_size(&ads->out),
 				DMA_TO_DEVICE);
 	ads->out.buf_phys = 0;
 
 	tegra_dma_free_channel(ads->in.dma_chan);
 	ads->in.dma_chan = NULL;
 	dma_unmap_single(&ads->pdev->dev, ads->in.buf_phys,
-				PCM_IN_BUFFER_SIZE,
+				buf_size(&ads->in),
 				DMA_FROM_DEVICE);
 	ads->in.buf_phys = 0;
 }
@@ -637,14 +673,25 @@ static void tear_down_dma(struct audio_driver_state *ads)
 static void dma_tx_complete_callback(struct tegra_dma_req *req)
 {
 	unsigned long flags;
-	struct audio_out_stream *aos = req->dev;
+	struct audio_stream *aos = req->dev;
 	int count = req->bytes_transferred;
+	u64 delta_us;
+	u64 max_delay_us = count * 10000 / (4 * 441);
 
 	pr_debug("%s bytes transferred %d\n", __func__, count);
 
+	aos->dma_has_it = false;
+	delta_us = ktime_to_us(ktime_sub(ktime_get_real(), aos->last_dma_ts));
+
+	if (delta_us > max_delay_us) {
+		pr_debug("%s: too late by %lld us\n", __func__,
+			delta_us - max_delay_us);
+		aos->errors++;
+	}
+
 	kfifo_skip(&aos->fifo, count);
 
-	if (kfifo_avail(&aos->fifo) > PCM_OUT_THRESHOLD &&
+	if (kfifo_avail(&aos->fifo) >= threshold_size(aos) &&
 			!completion_done(&aos->fifo_completion)) {
 		pr_debug("%s: complete (%d avail)\n", __func__,
 				kfifo_avail(&aos->fifo));
@@ -666,25 +713,34 @@ static void dma_rx_complete_threshold(struct tegra_dma_req *req)
 static void dma_rx_complete_callback(struct tegra_dma_req *req)
 {
 	unsigned long flags;
-	struct audio_in_stream *ais = req->dev;
+	struct audio_stream *ais = req->dev;
 	int count = req->bytes_transferred;
 
-	pr_debug("%s bytes transferred %d (%d available in fifo)\n", __func__,
+	spin_lock_irqsave(&ais->dma_req_lock, flags);
+
+	ais->dma_has_it = false;
+
+	pr_debug("%s(%d): transferred %d bytes (%d available in fifo)\n",
+			__func__,
+			smp_processor_id(),
 			count, kfifo_avail(&ais->fifo));
 
 	BUG_ON(kfifo_avail(&ais->fifo) < count);
 	__kfifo_add_in(&ais->fifo, count);
 
-	if (kfifo_avail(&ais->fifo) < PCM_IN_THRESHOLD &&
-			!completion_done(&ais->fifo_completion))
+	if (kfifo_avail(&ais->fifo) <= threshold_size(ais) &&
+			!completion_done(&ais->fifo_completion)) {
+		pr_debug("%s: signalling fifo completion\n", __func__);
 		complete(&ais->fifo_completion);
+	}
 
-	spin_lock_irqsave(&ais->dma_req_lock, flags);
-	ais->dma_has_it = false;
-	if (!ais->active || stop_recording_if_necessary_nosync(ais)) {
-		pr_warn("%s: recording has been stopped or cancelled (%d)\n",
-			__func__, ais->active);
+	if (stop_recording_if_necessary_nosync(ais)) {
 		spin_unlock_irqrestore(&ais->dma_req_lock, flags);
+		pr_debug("%s: done (stopped)\n", __func__);
+		if (!completion_done(&ais->stop_completion)) {
+			pr_debug("%s: signalling stop completion\n", __func__);
+			complete(&ais->stop_completion);
+		}
 		return;
 	}
 
@@ -693,14 +749,14 @@ static void dma_rx_complete_callback(struct tegra_dma_req *req)
 	/* This call will fail if we try to set up a DMA request that's
 	 * too small.
 	 */
-	ais->active = !resume_dma_recording(ais);
+	(void)resume_dma_recording(ais);
 	spin_unlock_irqrestore(&ais->dma_req_lock, flags);
 
 	pr_debug("%s: done\n", __func__);
 }
 
 static void setup_dma_tx_request(struct tegra_dma_req *req,
-		struct audio_out_stream *aos)
+		struct audio_stream *aos)
 {
 	struct audio_driver_state *ads = ads_from_out(aos);
 
@@ -718,7 +774,7 @@ static void setup_dma_tx_request(struct tegra_dma_req *req,
 }
 
 static void setup_dma_rx_request(struct tegra_dma_req *req,
-		struct audio_in_stream *ais)
+		struct audio_stream *ais)
 {
 	struct audio_driver_state *ads = ads_from_in(ais);
 
@@ -737,16 +793,32 @@ static void setup_dma_rx_request(struct tegra_dma_req *req,
 }
 
 /* Called with aos->dma_req_lock taken. */
-static int resume_dma_playback(struct audio_out_stream *aos)
+static int resume_dma_playback(struct audio_stream *aos)
 {
 	int rc;
 	struct audio_driver_state *ads = ads_from_out(aos);
 	struct tegra_dma_req *req = &aos->dma_req;
 
-	unsigned out = __kfifo_off(&aos->fifo, aos->fifo.out);
-	unsigned in = __kfifo_off(&aos->fifo, aos->fifo.in);
+	unsigned out, in;
 
+	out = __kfifo_off(&aos->fifo, aos->fifo.out);
+	in = __kfifo_off(&aos->fifo, aos->fifo.in);
+
+	/* stop_playback_if_necessary() already checks to see if the fifo is
+	 * empty.
+	 */
 	BUG_ON(!kfifo_len(&aos->fifo));
+
+	if (aos->dma_has_it) {
+		pr_debug("%s: playback already in progress\n", __func__);
+		return 0;
+	}
+
+#if 0
+	i2s_fifo_clear(ads->i2s_base, I2S_FIFO_TX);
+#endif
+	i2s_fifo_set_attention_level(ads->i2s_base,
+			I2S_FIFO_TX, aos->i2s_fifo_atn_level);
 
 	req->source_addr = aos->buf_phys + out;
 	if (out < in)
@@ -758,52 +830,61 @@ static int resume_dma_playback(struct audio_out_stream *aos)
 			aos->buf_phys + out, req->size, DMA_TO_DEVICE);
 
 	/* Don't send all the data yet. */
-	if (req->size > PCM_OUT_DMA_CHUNK)
-		req->size = PCM_OUT_DMA_CHUNK;
+	if (req->size > chunk_size(aos))
+		req->size = chunk_size(aos);
 	pr_debug("%s resume playback (%d in fifo, writing %d, in %d out %d)\n",
 			__func__, kfifo_len(&aos->fifo), req->size, in, out);
 
-	i2s_fifo_set_attention_level(ads->i2s_base,
-			I2S_FIFO_TX, I2S_FIFO_ATN_LVL_FOUR_SLOTS);
 	i2s_fifo_enable(ads->i2s_base, I2S_FIFO_TX, 1);
 
+	aos->last_dma_ts = ktime_get_real();
 	rc = tegra_dma_enqueue_req(aos->dma_chan, req);
 	aos->dma_has_it = !rc;
+	if (!aos->dma_has_it)
+		pr_err("%s: could not enqueue TX DMA req\n", __func__);
 	return rc;
 }
 
 /* Called with aos->dma_req_lock taken. */
-static int start_dma_playback(struct audio_out_stream *aos)
+static int start_dma_playback(struct audio_stream *aos)
 {
 	return resume_dma_playback(aos);
 }
 
 /* Called with aos->dma_req_lock taken. */
-static void stop_dma_playback(struct audio_out_stream *aos)
+static void stop_dma_playback(struct audio_stream *aos)
 {
+	int spin = 0;
 	struct audio_driver_state *ads = ads_from_out(aos);
 	pr_debug("%s\n", __func__);
-	tegra_dma_dequeue_req(ads->out.dma_chan, &ads->out.dma_req);
 	i2s_fifo_enable(ads->i2s_base, I2S_FIFO_TX, 0);
-	while (i2s_get_status(ads->i2s_base) & I2S_I2S_FIFO_TX_BUSY)
-		pr_info("%s: spin\n", __func__);
+	while ((i2s_get_status(ads->i2s_base) & I2S_I2S_FIFO_TX_BUSY) &&
+			spin < 100)
+		if (spin++ > 50)
+			pr_info("%s: spin %d\n", __func__, spin);
+	if (spin == 100)
+		pr_warn("%s: spinny\n", __func__);
 }
 
 /* This function may be called from either interrupt or process context. */
 /* Called with ais->dma_req_lock taken. */
-static int resume_dma_recording(struct audio_in_stream *ais)
+static int resume_dma_recording(struct audio_stream *ais)
 {
 	struct audio_driver_state *ads = ads_from_in(ais);
 	struct tegra_dma_req *req = &ais->dma_req;
 
-	unsigned out = __kfifo_off(&ais->fifo, ais->fifo.out);
-	unsigned in = __kfifo_off(&ais->fifo, ais->fifo.in);
+	unsigned out, in;
+
+	out = __kfifo_off(&ais->fifo, ais->fifo.out);
+	in = __kfifo_off(&ais->fifo, ais->fifo.in);
 
 	pr_debug("%s in %d out %d\n", __func__, in, out);
 
-	if (kfifo_is_full(&ais->fifo)) {
-		pr_err("%s: input fifo is full\n", __func__);
-		return -ENOMEM;
+	BUG_ON(kfifo_is_full(&ais->fifo));
+
+	if (ais->dma_has_it) {
+		pr_debug("%s: recording already in progress\n", __func__);
+		return 0;
 	}
 
 	req->dest_addr = ais->buf_phys + in;
@@ -813,51 +894,56 @@ static int resume_dma_recording(struct audio_in_stream *ais)
 		req->size = out - in;
 
 	/* Don't send all the data yet. */
-	if (req->size > PCM_OUT_DMA_CHUNK)
-		req->size = PCM_OUT_DMA_CHUNK;
+	if (req->size > chunk_size(ais))
+		req->size = chunk_size(ais);
 
 	req->size = round_down(req->size, 4);
 
 	if (!req->size) {
 		pr_err("%s: invalid request size %d (in %d out %d)\n", __func__,
 			req->size, in, out);
-		return -ENOMEM;
+		return -EIO;
 	}
 
 	dma_sync_single_for_device(NULL,
 			req->dest_addr, req->size, DMA_FROM_DEVICE);
 
-	BUG_ON(ais->dma_has_it);
 	ais->dma_has_it = !tegra_dma_enqueue_req(ais->dma_chan, &ais->dma_req);
 	if (!ais->dma_has_it) {
 		pr_err("%s: could not enqueue RX DMA req\n", __func__);
 		return -EINVAL;
 	}
 
+#if 0
 	i2s_fifo_clear(ads->i2s_base, I2S_FIFO_RX);
+#endif
 	i2s_fifo_set_attention_level(ads->i2s_base,
-			I2S_FIFO_RX, I2S_FIFO_ATN_LVL_TWELVE_SLOTS);
+			I2S_FIFO_RX, ais->i2s_fifo_atn_level);
 	i2s_fifo_enable(ads->i2s_base, I2S_FIFO_RX, 1);
 	return 0;
 }
 
 /* Called with ais->dma_req_lock taken. */
-static int start_dma_recording(struct audio_in_stream *ais)
+static int start_dma_recording(struct audio_stream *ais)
 {
-	pr_info("%s\n", __func__);
+	pr_debug("%s\n", __func__);
 	return resume_dma_recording(ais);
 }
 
 /* Called with ais->dma_req_lock taken. */
-static void stop_dma_recording(struct audio_in_stream *ais)
+static void stop_dma_recording(struct audio_stream *ais)
 {
+	int spin = 0;
 	struct audio_driver_state *ads = ads_from_in(ais);
-	pr_info("%s\n", __func__);
+	pr_debug("%s\n", __func__);
 	i2s_fifo_enable(ads->i2s_base, I2S_FIFO_RX, 0);
 	i2s_fifo_clear(ads->i2s_base, I2S_FIFO_RX);
-	while (i2s_get_status(ads->i2s_base) & I2S_I2S_FIFO_RX_BUSY)
-		pr_debug("%s: spin\n", __func__);
-	ais->dma_has_it = false;
+	while ((i2s_get_status(ads->i2s_base) & I2S_I2S_FIFO_RX_BUSY) &&
+			spin < 100)
+		if (spin++ > 50)
+			pr_info("%s: spin %d\n", __func__, spin);
+	if (spin == 100)
+		pr_warn("%s: spinny\n", __func__);
 }
 
 /* PIO (non-DMA) */
@@ -875,15 +961,22 @@ static void tear_down_pio(struct audio_driver_state *ads)
 	disable_irq(ads->irq);
 }
 
-static int start_pio_playback(struct audio_out_stream *aos)
+static int start_pio_playback(struct audio_stream *aos)
 {
 	struct audio_driver_state *ads = ads_from_out(aos);
 
-	pr_info("%s\n", __func__);
+	if (i2s_is_fifo_enabled(ads->i2s_base, I2S_FIFO_TX)) {
+		pr_debug("%s: playback is already in progress\n", __func__);
+		return 0;
+	}
+
+	pr_debug("%s\n", __func__);
 
 	i2s_fifo_set_attention_level(ads->i2s_base,
-			I2S_FIFO_TX, I2S_FIFO_ATN_LVL_ONE_SLOT);
+			I2S_FIFO_TX, aos->i2s_fifo_atn_level);
+#if 0
 	i2s_fifo_clear(ads->i2s_base, I2S_FIFO_TX);
+#endif
 
 	i2s_set_fifo_irq_on_err(ads->i2s_base, I2S_FIFO_TX, 1);
 	i2s_set_fifo_irq_on_qe(ads->i2s_base, I2S_FIFO_TX, 1);
@@ -892,7 +985,7 @@ static int start_pio_playback(struct audio_out_stream *aos)
 	return 0;
 }
 
-static void stop_pio_playback(struct audio_out_stream *aos)
+static void stop_pio_playback(struct audio_stream *aos)
 {
 	struct audio_driver_state *ads = ads_from_out(aos);
 
@@ -912,15 +1005,22 @@ static void stop_pio_playback(struct audio_out_stream *aos)
 	memset(&ads->pio_stats, 0, sizeof(ads->pio_stats));
 }
 
-static int start_pio_recording(struct audio_in_stream *ais)
+static int start_pio_recording(struct audio_stream *ais)
 {
 	struct audio_driver_state *ads = ads_from_in(ais);
 
-	pr_info("%s\n", __func__);
+	if (i2s_is_fifo_enabled(ads->i2s_base, I2S_FIFO_RX)) {
+		pr_debug("%s: already started\n", __func__);
+		return 0;
+	}
+
+	pr_debug("%s: start\n", __func__);
 
 	i2s_fifo_set_attention_level(ads->i2s_base,
-			I2S_FIFO_RX, I2S_FIFO_ATN_LVL_TWELVE_SLOTS);
+			I2S_FIFO_RX, ais->i2s_fifo_atn_level);
+#if 0
 	i2s_fifo_clear(ads->i2s_base, I2S_FIFO_RX);
+#endif
 
 	i2s_set_fifo_irq_on_err(ads->i2s_base, I2S_FIFO_RX, 1);
 	i2s_set_fifo_irq_on_qe(ads->i2s_base, I2S_FIFO_RX, 1);
@@ -930,22 +1030,22 @@ static int start_pio_recording(struct audio_in_stream *ais)
 	return 0;
 }
 
-static void stop_pio_recording(struct audio_in_stream *ais)
+static void stop_pio_recording(struct audio_stream *ais)
 {
 	struct audio_driver_state *ads = ads_from_in(ais);
 
-	pr_info("%s\n", __func__);
+	pr_debug("%s\n", __func__);
 
 	i2s_set_fifo_irq_on_err(ads->i2s_base, I2S_FIFO_RX, 0);
 	i2s_set_fifo_irq_on_qe(ads->i2s_base, I2S_FIFO_RX, 0);
 	i2s_fifo_enable(ads->i2s_base, I2S_FIFO_RX, 0);
 	i2s_fifo_clear(ads->i2s_base, I2S_FIFO_RX);
 
-	pr_info("%s: interrupts %d\n", __func__,
+	pr_debug("%s: interrupts %d\n", __func__,
 			ads->pio_stats.i2s_interrupt_count);
-	pr_info("%s: received   %d\n", __func__,
+	pr_debug("%s: received   %d\n", __func__,
 			ads->pio_stats.rx_fifo_read);
-	pr_info("%s: rx errors  %d\n", __func__,
+	pr_debug("%s: rx errors  %d\n", __func__,
 			ads->pio_stats.rx_fifo_errors);
 
 	memset(&ads->pio_stats, 0, sizeof(ads->pio_stats));
@@ -963,8 +1063,10 @@ static irqreturn_t i2s_interrupt(int irq, void *data)
 	if (status & I2S_I2S_FIFO_TX_ERR)
 		ads->pio_stats.tx_fifo_errors++;
 
-	if (status & I2S_I2S_FIFO_RX_ERR)
+	if (status & I2S_I2S_FIFO_RX_ERR) {
 		ads->pio_stats.rx_fifo_errors++;
+		ads->in.errors++;
+	}
 
 	if (status & I2S_FIFO_ERR)
 		i2s_ack_status(ads->i2s_base);
@@ -975,7 +1077,7 @@ static irqreturn_t i2s_interrupt(int irq, void *data)
 		int len;
 		u16 fifo_buffer[32];
 
-		struct audio_out_stream *out = &ads->out;
+		struct audio_stream *out = &ads->out;
 
 		if (!i2s_is_fifo_enabled(ads->i2s_base, I2S_FIFO_TX)) {
 			pr_debug("%s: tx fifo not enabled, skipping\n",
@@ -985,7 +1087,7 @@ static irqreturn_t i2s_interrupt(int irq, void *data)
 
 		pr_debug("%s tx fifo is ready\n", __func__);
 
-		if (kfifo_avail(&out->fifo) > PCM_OUT_THRESHOLD &&
+		if (kfifo_avail(&out->fifo) > threshold_size(out) &&
 				!completion_done(&out->fifo_completion)) {
 			pr_debug("%s: tx complete (%d avail)\n", __func__,
 					kfifo_avail(&out->fifo));
@@ -1026,7 +1128,7 @@ check_rx:
 		int nr;
 		int full;
 
-		struct audio_in_stream *in = &ads->in;
+		struct audio_stream *in = &ads->in;
 
 		if (!i2s_is_fifo_enabled(ads->i2s_base, I2S_FIFO_RX)) {
 			pr_debug("%s: rx fifo not enabled, skipping\n",
@@ -1049,15 +1151,21 @@ check_rx:
 
 		ads->pio_stats.rx_fifo_read += full * sizeof(u16);
 
-		if (kfifo_avail(&in->fifo) < PCM_IN_THRESHOLD &&
+		if (kfifo_avail(&in->fifo) < threshold_size(in) &&
 				!completion_done(&in->fifo_completion)) {
 			pr_debug("%s: rx complete (%d avail)\n", __func__,
 					kfifo_avail(&in->fifo));
 			complete(&in->fifo_completion);
 		}
 
-		if (!in->active) {
-			pr_info("%s: stopping recording\n", __func__);
+		if (stop_recording_if_necessary_nosync(&ads->in)) {
+			pr_debug("%s: recording cancelled or fifo full\n",
+				__func__);
+			if (!completion_done(&ads->in.stop_completion)) {
+				pr_debug("%s: signalling stop completion\n",
+					__func__);
+				complete(&ads->in.stop_completion);
+			}
 			goto done;
 		}
 
@@ -1079,6 +1187,8 @@ static ssize_t tegra_audio_write(struct file *file,
 
 	mutex_lock(&ads->out.lock);
 
+	ads->out.active = true;
+
 	if (!IS_ALIGNED(size, 4)) {
 		pr_err("%s: user size request %d not aligned to 4\n",
 			__func__, size);
@@ -1093,6 +1203,12 @@ again:
 	rc = kfifo_from_user(&ads->out.fifo, buf + total, size - total, &nw);
 	if (rc < 0) {
 		pr_err("%s: error copying from user\n", __func__);
+		goto done;
+	}
+
+	rc = start_playback(&ads->out);
+	if (rc < 0) {
+		pr_err("%s: could not start playback: %d\n", __func__, rc);
 		goto done;
 	}
 
@@ -1115,9 +1231,76 @@ again:
 	rc = total;
 	*off += total;
 
-	start_playback_if_necessary(&ads->out);
 done:
+	ads->out.active = false;
 	mutex_unlock(&ads->out.lock);
+	return rc;
+}
+
+static long tegra_audio_out_ioctl(struct file *file,
+			unsigned int cmd, unsigned long arg)
+{
+	int rc = 0;
+	struct audio_driver_state *ads = ads_from_misc_out_ctl(file);
+	struct audio_stream *aos = &ads->out;
+
+	mutex_lock(&aos->lock);
+
+	switch (cmd) {
+	case TEGRA_AUDIO_OUT_SET_BUF_CONFIG: {
+		struct tegra_audio_buf_config cfg;
+		if (copy_from_user(&cfg, (void __user *)arg, sizeof(cfg))) {
+			rc = -EFAULT;
+			break;
+		}
+		if (aos->active) {
+			pr_err("%s: playback in progress\n", __func__);
+			rc = -EBUSY;
+			break;
+		}
+		rc = init_stream_buffer(aos, &cfg, 0);
+		if (rc < 0)
+			break;
+		aos->buf_config = cfg;
+	}
+		break;
+	case TEGRA_AUDIO_OUT_GET_BUF_CONFIG:
+		if (copy_to_user((void __user *)arg, &aos->buf_config,
+				sizeof(aos->buf_config)))
+			rc = -EFAULT;
+		break;
+	case TEGRA_AUDIO_OUT_GET_ERROR_COUNT:
+		if (copy_to_user((void __user *)arg, &aos->errors,
+				sizeof(aos->errors)))
+			rc = -EFAULT;
+		if (!rc)
+			aos->errors = 0;
+		break;
+	case TEGRA_AUDIO_OUT_PRELOAD_FIFO: {
+		struct tegra_audio_out_preload preload;
+		if (copy_from_user(&preload, (void __user *)arg,
+				sizeof(preload))) {
+			rc = -EFAULT;
+			break;
+		}
+		rc = kfifo_from_user(&ads->out.fifo,
+				(void __user *)preload.data, preload.len,
+				&preload.len_written);
+		if (rc < 0) {
+			pr_err("%s: error copying from user\n", __func__);
+			break;
+		}
+		if (copy_to_user((void __user *)arg, &preload, sizeof(preload)))
+			rc = -EFAULT;
+		pr_info("%s: preloaded output fifo with %d bytes\n", __func__,
+			preload.len_written);
+	}
+		break;
+	default:
+		rc = -EINVAL;
+	}
+
+	mutex_unlock(&aos->lock);
 	return rc;
 }
 
@@ -1125,8 +1308,8 @@ static long tegra_audio_in_ioctl(struct file *file,
 			unsigned int cmd, unsigned long arg)
 {
 	int rc = 0;
-	struct audio_driver_state *ads = ads_from_misc_in(file);
-	struct audio_in_stream *ais = &ads->in;
+	struct audio_driver_state *ads = ads_from_misc_in_ctl(file);
+	struct audio_stream *ais = &ads->in;
 
 	mutex_lock(&ais->lock);
 
@@ -1138,11 +1321,13 @@ static long tegra_audio_in_ioctl(struct file *file,
 		break;
 	case TEGRA_AUDIO_IN_STOP:
 		pr_info("%s: stop recording\n", __func__);
-		ads->recording_cancelled = true;
-		stop_recording_if_necessary(ais);
-		if (!completion_done(&ais->fifo_completion)) {
-			pr_info("%s: complete\n", __func__);
-			complete(&ais->fifo_completion);
+		if (ais->active && !ads->recording_cancelled) {
+			ads->recording_cancelled = true;
+			stop_recording(ais);
+			if (!completion_done(&ais->fifo_completion)) {
+				pr_info("%s: complete\n", __func__);
+				complete(&ais->fifo_completion);
+			}
 		}
 		break;
 	case TEGRA_AUDIO_IN_SET_CONFIG: {
@@ -1197,6 +1382,35 @@ static long tegra_audio_in_ioctl(struct file *file,
 				sizeof(ads->in_config)))
 			rc = -EFAULT;
 		break;
+	case TEGRA_AUDIO_IN_SET_BUF_CONFIG: {
+		struct tegra_audio_buf_config cfg;
+		if (copy_from_user(&cfg, (void __user *)arg, sizeof(cfg))) {
+			rc = -EFAULT;
+			break;
+		}
+		if (ais->active) {
+			pr_err("%s: recording in progress\n", __func__);
+			rc = -EBUSY;
+			break;
+		}
+		rc = init_stream_buffer(ais, &cfg, PCM_IN_BUFFER_PADDING);
+		if (rc < 0)
+			break;
+		ais->buf_config = cfg;
+	}
+		break;
+	case TEGRA_AUDIO_IN_GET_BUF_CONFIG:
+		if (copy_to_user((void __user *)arg, &ais->buf_config,
+				sizeof(ais->buf_config)))
+			rc = -EFAULT;
+		break;
+	case TEGRA_AUDIO_IN_GET_ERROR_COUNT:
+		if (copy_to_user((void __user *)arg, &ais->errors,
+				sizeof(ais->errors)))
+			rc = -EFAULT;
+		if (!rc)
+			ais->errors = 0;
+		break;
 	default:
 		rc = -EINVAL;
 	}
@@ -1243,8 +1457,8 @@ static int downsample(const s16 *in, int in_len,
 
 	*consumed = i;
 
-	pr_debug("%s: in_len %d out_len %d consumed %d generated %d\n", __func__,
-		in_len, out_len, *consumed, oi);
+	pr_debug("%s: in_len %d out_len %d consumed %d generated %d\n",
+		__func__, in_len, out_len, *consumed, oi);
 	return oi;
 }
 
@@ -1271,6 +1485,7 @@ static ssize_t __downsample_to_user(struct audio_driver_state *ads,
 	}
 
 	*num_consumed *= sizeof(s16);
+	BUG_ON(*num_consumed > src_size);
 
 	kfifo_skip(&ads->in.fifo, *num_consumed);
 
@@ -1284,8 +1499,7 @@ static ssize_t downsample_to_user(struct audio_driver_state *ads,
 			void __user *buf,
 			size_t size) /* bytes to write to user buffer */
 {
-	unsigned out;
-	unsigned in;
+	unsigned out, in;
 	int bytes_consumed_from_fifo;
 	int bytes_ds;
 	int bytes_till_end;
@@ -1338,12 +1552,15 @@ again:
 		BUG_ON(take_two);
 		take_two = true;
 
-		pr_debug("%s: not enough data till end of fifo\n", __func__);
-
-		if (in < PCM_IN_BUFFER_PADDING)
+		if (in < PCM_IN_BUFFER_PADDING) {
+			pr_debug("%s: not enough data till end of fifo\n",
+					__func__);
 			return 0;
+		}
 
-		memcpy(ads->in.buffer + PCM_IN_BUFFER_SIZE,
+		pr_debug("%s: adding padding to fifo\n", __func__);
+
+		memcpy(ads->in.buffer + buf_size(&ads->in),
 			ads->in.buffer,
 			PCM_IN_BUFFER_PADDING);
 		bytes_till_end += PCM_IN_BUFFER_PADDING;
@@ -1364,6 +1581,8 @@ static ssize_t tegra_audio_read(struct file *file, char __user *buf,
 
 	mutex_lock(&ads->in.lock);
 
+	ads->in.active = true;
+
 	if (!IS_ALIGNED(size, 4)) {
 		pr_err("%s: user size request %d not aligned to 4\n",
 			__func__, size);
@@ -1371,15 +1590,21 @@ static ssize_t tegra_audio_read(struct file *file, char __user *buf,
 		goto done_err;
 	}
 
-	pr_debug("%s: read %d bytes, %d available\n", __func__,
-			size, kfifo_avail(&ads->in.fifo));
+	pr_debug("%s:%d: read %d bytes, %d available\n", __func__,
+			smp_processor_id(),
+			size, kfifo_len(&ads->in.fifo));
 
-	if (!ads->recording_cancelled)
-		start_recording_if_necessary(&ads->in);
+	rc = start_recording_if_necessary(&ads->in);
+	if (rc < 0) {
+		pr_err("%s: could not start recording\n", __func__);
+		goto done_err;
+	}
 
 again:
-	if (ads->recording_cancelled ||
-			(!ads->in.active && kfifo_is_empty(&ads->in.fifo))) {
+	/* If we want recording to stop immediately after it gets cancelled,
+	 * then we do not want to wait for the fifo to get drained.
+	 */
+	if (ads->recording_cancelled /* && kfifo_is_empty(&ads->in.fifo) */) {
 		pr_debug("%s: recording has been cancelled (read %d bytes)\n",
 				__func__, total);
 		goto done_ok;
@@ -1398,9 +1623,16 @@ again:
 	pr_debug("%s: copied %d bytes to user, total %d/%d\n",
 			__func__, nr, total, size);
 
-	if (total < size && ads->in.active) {
-		if (!ads->recording_cancelled)
-			start_recording_if_necessary(&ads->in);
+	if (total < size) {
+		/* If we lost data, recording was stopped, so we need to resume
+		 * it here.
+		*/
+		rc = start_recording_if_necessary(&ads->in);
+		if (rc < 0) {
+			pr_err("%s: could not resume recording\n", __func__);
+			goto done_err;
+		}
+
 		mutex_unlock(&ads->in.lock);
 		pr_debug("%s: sleep (user %d total %d nr %d)\n", __func__,
 				size, total, nr);
@@ -1423,6 +1655,7 @@ done_ok:
 	*off += total;
 
 done_err:
+	ads->in.active = false;
 	mutex_unlock(&ads->in.lock);
 	return rc;
 }
@@ -1434,8 +1667,11 @@ static int tegra_audio_out_open(struct inode *inode, struct file *file)
 	pr_info("%s\n", __func__);
 
 	mutex_lock(&ads->out.lock);
-	if (!ads->out.opened++)
+	if (!ads->out.opened++) {
+		pr_info("%s: resetting fifo and error count\n", __func__);
+		ads->out.errors = 0;
 		kfifo_reset(&ads->out.fifo);
+	}
 	mutex_unlock(&ads->out.lock);
 
 	return 0;
@@ -1470,6 +1706,7 @@ static int tegra_audio_in_open(struct inode *inode, struct file *file)
 		 * input device.
 		 */
 		ads->recording_cancelled = false;
+		ads->in.errors = 0;
 		kfifo_reset(&ads->in.fifo);
 	}
 	mutex_unlock(&ads->in.lock);
@@ -1483,125 +1720,13 @@ static int tegra_audio_in_release(struct inode *inode, struct file *file)
 	struct audio_driver_state *ads = ads_from_misc_in(file);
 
 	pr_info("%s\n", __func__);
-
 	mutex_lock(&ads->in.lock);
 	if (ads->in.opened)
 		ads->in.opened--;
-	if (!ads->in.opened) {
-		pr_info("%s: stop recording\n", __func__);
-		stop_recording_if_necessary(&ads->in);
-	}
 	mutex_unlock(&ads->in.lock);
 	pr_info("%s: done\n", __func__);
 	return 0;
 }
-
-#ifdef CONFIG_DEBUG_FS
-static int debugfs_open(struct inode *inode, struct file *file)
-{
-	file->private_data = inode->i_private;
-	return 0;
-}
-
-static DEFINE_MUTEX(debugfs_lock);
-
-ssize_t debugfs_read(struct file *file, char __user *buf,
-		size_t size, loff_t *off)
-{
-	int rc = 0;
-	struct audio_driver_state *ads = file->private_data;
-	static bool r;
-
-	mutex_lock(&debugfs_lock);
-
-	if (r) {
-		r = false;
-		goto done;
-	}
-
-	if (size < 5) {
-		rc = -ETOOSMALL;
-		goto done;
-	}
-
-	if (copy_to_user(buf, ads->using_dma ? "dma\n" : "pio\n", 5)) {
-		rc = -EFAULT;
-		goto done;
-	}
-
-	r = true;
-	rc = *off = 5;
-done:
-	mutex_unlock(&debugfs_lock);
-	return rc;
-}
-
-ssize_t debugfs_write(struct file *file,
-		const char __user *buf, size_t size, loff_t *off)
-{
-	char cmd[5];
-	int use_dma;
-
-	struct audio_driver_state *ads = file->private_data;
-
-	if (size < 4) {
-		pr_err("%s: buffer size %d too small\n", __func__, size);
-		return -ETOOSMALL;
-	}
-
-	if (copy_from_user(cmd, buf, 4)) {
-		pr_err("%s: could not copy from user\n", __func__);
-		return -EFAULT;
-	}
-	cmd[3] = 0;
-
-	use_dma = 0;
-	if (!strcmp(cmd, "dma"))
-		use_dma = 1;
-	else if (strcmp(cmd, "pio")) {
-		pr_err("%s: invalid string [%s]\n", __func__, cmd);
-		return -EINVAL;
-	}
-
-	mutex_lock(&ads->out.lock);
-	mutex_lock(&ads->in.lock);
-	if (ads->out.active || ads->in.active) {
-		pr_err("%s: playback or recording in progress.\n", __func__);
-		mutex_unlock(&ads->in.lock);
-		mutex_unlock(&ads->out.lock);
-		return -EBUSY;
-	}
-	if (!!use_dma ^ !!ads->using_dma)
-		toggle_dma(ads);
-	else
-		pr_info("%s: no change\n", __func__);
-	mutex_unlock(&ads->in.lock);
-	mutex_unlock(&ads->out.lock);
-
-	return 5;
-}
-
-static const struct file_operations debugfs_ops = {
-	.read = debugfs_read,
-	.write = debugfs_write,
-	.open = debugfs_open,
-};
-
-static void setup_tegra_audio_debugfs(struct audio_driver_state *ads)
-{
-	struct dentry *dent;
-
-	dent = debugfs_create_dir("tegra_audio", 0);
-	if (IS_ERR(dent)) {
-		pr_err("%s: could not create dentry\n", __func__);
-		return;
-	}
-
-	debugfs_create_file("dma", 0666, dent, ads, &debugfs_ops);
-}
-#else
-static inline void setup_tegra_audio_debugfs(struct audio_driver_state *ads) {}
-#endif
 
 static const struct file_operations tegra_audio_out_fops = {
 	.owner = THIS_MODULE,
@@ -1614,12 +1739,281 @@ static const struct file_operations tegra_audio_in_fops = {
 	.owner = THIS_MODULE,
 	.open = tegra_audio_in_open,
 	.read = tegra_audio_read,
-	.unlocked_ioctl = tegra_audio_in_ioctl,
 	.release = tegra_audio_in_release,
 };
 
+static int tegra_audio_ctl_open(struct inode *inode, struct file *file)
+{
+	return 0;
+}
+
+static int tegra_audio_ctl_release(struct inode *inode, struct file *file)
+{
+	return 0;
+}
+
+static const struct file_operations tegra_audio_out_ctl_fops = {
+	.owner = THIS_MODULE,
+	.open = tegra_audio_ctl_open,
+	.release = tegra_audio_ctl_release,
+	.unlocked_ioctl = tegra_audio_out_ioctl,
+};
+
+static const struct file_operations tegra_audio_in_ctl_fops = {
+	.owner = THIS_MODULE,
+	.open = tegra_audio_ctl_open,
+	.release = tegra_audio_ctl_release,
+	.unlocked_ioctl = tegra_audio_in_ioctl,
+};
+
+static int init_stream_buffer(struct audio_stream *s,
+				struct tegra_audio_buf_config *cfg,
+				unsigned padding)
+{
+	pr_info("%s (size %d threshold %d chunk %d)\n", __func__,
+		cfg->size, cfg->threshold, cfg->chunk);
+
+	if (cfg->chunk < PCM_DMA_CHUNK_MIN_SIZE_ORDER) {
+		pr_err("%s: chunk %d too small (%d min)\n", __func__,
+			cfg->chunk, PCM_DMA_CHUNK_MIN_SIZE_ORDER);
+		return -EINVAL;
+	}
+
+	if (cfg->chunk > cfg->size) {
+		pr_err("%s: chunk %d > size %d\n", __func__,
+				cfg->chunk, cfg->size);
+		return -EINVAL;
+	}
+
+	if (cfg->threshold > cfg->size) {
+		pr_err("%s: threshold %d > size %d\n", __func__,
+				cfg->threshold, cfg->size);
+		return -EINVAL;
+	}
+
+	if ((1 << cfg->size) < padding) {
+		pr_err("%s: size %d < buffer padding %d (bytes)\n", __func__,
+			cfg->size, padding);
+		return -EINVAL;
+	}
+
+	if (cfg->size > PCM_BUFFER_MAX_SIZE_ORDER) {
+		pr_err("%s: size %d exceeds max %d\n", __func__,
+			cfg->size, PCM_BUFFER_MAX_SIZE_ORDER);
+		return -EINVAL;
+	}
+
+	if (!s->buffer) {
+		pr_debug("%s: allocating buffer (size %d, padding %d)\n",
+				__func__, 1 << cfg->size, padding);
+		s->buffer = kmalloc((1 << cfg->size) + padding,
+				GFP_KERNEL | GFP_DMA);
+	}
+	if (!s->buffer) {
+		pr_err("%s: could not allocate output buffer\n", __func__);
+		return -ENOMEM;
+	}
+
+	kfifo_init(&s->fifo, s->buffer, 1 << cfg->size);
+	return 0;
+}
+
+
+static int setup_misc_device(struct miscdevice *misc,
+			const struct file_operations  *fops,
+			const char *fmt, ...)
+{
+	int rc = 0;
+	va_list args;
+	const int sz = 64;
+
+	va_start(args, fmt);
+
+	memset(misc, 0, sizeof(*misc));
+	misc->minor = MISC_DYNAMIC_MINOR;
+	misc->name  = kmalloc(sz, GFP_KERNEL);
+	if (!misc->name) {
+		rc = -ENOMEM;
+		goto done;
+	}
+
+	vsnprintf((char *)misc->name, sz, fmt, args);
+	misc->fops = fops;
+	if (misc_register(misc)) {
+		pr_err("%s: could not register %s\n", __func__, misc->name);
+		kfree(misc->name);
+		rc = -EIO;
+		goto done;
+	}
+
+done:
+	va_end(args);
+	return rc;
+}
+
+static ssize_t dma_toggle_show(struct device *dev,
+				struct device_attribute *attr,
+				char *buf)
+{
+	struct tegra_audio_platform_data *pdata = dev->platform_data;
+	struct audio_driver_state *ads = pdata->driver_data;
+	return sprintf(buf, "%s\n", ads->using_dma ? "dma" : "pio");
+}
+
+static ssize_t dma_toggle_store(struct device *dev,
+			struct device_attribute *attr,
+			const char *buf, size_t count)
+{
+	int use_dma;
+	struct tegra_audio_platform_data *pdata = dev->platform_data;
+	struct audio_driver_state *ads = pdata->driver_data;
+
+	if (count < 4)
+		return -EINVAL;
+
+	use_dma = 0;
+	if (!strncmp(buf, "dma", 3))
+		use_dma = 1;
+	else if (strncmp(buf, "pio", 3)) {
+		dev_err(dev, "%s: invalid string [%s]\n", __func__, buf);
+		return -EINVAL;
+	}
+
+	mutex_lock(&ads->out.lock);
+	mutex_lock(&ads->in.lock);
+	if (ads->out.active || ads->in.active) {
+		dev_err(dev, "%s: playback or recording in progress.\n",
+			__func__);
+		mutex_unlock(&ads->in.lock);
+		mutex_unlock(&ads->out.lock);
+		return -EBUSY;
+	}
+	if (!!use_dma ^ !!ads->using_dma)
+		toggle_dma(ads);
+	else
+		dev_info(dev, "%s: no change\n", __func__);
+	mutex_unlock(&ads->in.lock);
+	mutex_unlock(&ads->out.lock);
+
+	return count;
+}
+
+static DEVICE_ATTR(dma_toggle, 0644, dma_toggle_show, dma_toggle_store);
+
+static ssize_t __attr_fifo_atn_read(char *buf, int atn_lvl)
+{
+	switch (atn_lvl) {
+	case I2S_FIFO_ATN_LVL_ONE_SLOT:
+		strncpy(buf, "1\n", 2);
+		return 2;
+	case I2S_FIFO_ATN_LVL_FOUR_SLOTS:
+		strncpy(buf, "4\n", 2);
+		return 2;
+	case I2S_FIFO_ATN_LVL_EIGHT_SLOTS:
+		strncpy(buf, "8\n", 2);
+		return 2;
+	case I2S_FIFO_ATN_LVL_TWELVE_SLOTS:
+		strncpy(buf, "12\n", 3);
+		return 3;
+	default:
+		BUG_ON(1);
+		return -EIO;
+	}
+}
+
+static ssize_t __attr_fifo_atn_write(struct audio_driver_state *ads,
+		struct audio_stream *as,
+		int *fifo_lvl,
+		const char *buf, size_t size)
+{
+	int lvl;
+
+	if (size > 3) {
+		pr_err("%s: buffer size %d too big\n", __func__, size);
+		return -EINVAL;
+	}
+
+	if (sscanf(buf, "%d", &lvl) != 1) {
+		pr_err("%s: invalid input string [%s]\n", __func__, buf);
+		return -EINVAL;
+	}
+
+	switch (lvl) {
+	case 1:
+		lvl = I2S_FIFO_ATN_LVL_ONE_SLOT;
+		break;
+	case 4:
+		lvl = I2S_FIFO_ATN_LVL_FOUR_SLOTS;
+		break;
+	case 8:
+		lvl = I2S_FIFO_ATN_LVL_EIGHT_SLOTS;
+		break;
+	case 12:
+		lvl = I2S_FIFO_ATN_LVL_TWELVE_SLOTS;
+		break;
+	default:
+		pr_err("%s: invalid attention level %d\n", __func__, lvl);
+		return -EINVAL;
+	}
+
+	mutex_lock(&as->lock);
+	if (as->active) {
+		pr_err("%s: in progress.\n", __func__);
+		mutex_unlock(&as->lock);
+		return -EBUSY;
+	}
+	*fifo_lvl = lvl;
+	pr_info("%s: fifo level %d\n", __func__, *fifo_lvl);
+	mutex_unlock(&as->lock);
+
+	return size;
+}
+
+static ssize_t tx_fifo_atn_show(struct device *dev,
+				struct device_attribute *attr,
+				char *buf)
+{
+	struct tegra_audio_platform_data *pdata = dev->platform_data;
+	struct audio_driver_state *ads = pdata->driver_data;
+	return __attr_fifo_atn_read(buf, ads->out.i2s_fifo_atn_level);
+}
+
+static ssize_t tx_fifo_atn_store(struct device *dev,
+			struct device_attribute *attr,
+			const char *buf, size_t count)
+{
+	struct tegra_audio_platform_data *pdata = dev->platform_data;
+	struct audio_driver_state *ads = pdata->driver_data;
+	return __attr_fifo_atn_write(ads, &ads->out,
+			&ads->out.i2s_fifo_atn_level, buf, count);
+}
+
+static DEVICE_ATTR(tx_fifo_atn, 0644, tx_fifo_atn_show, tx_fifo_atn_store);
+
+static ssize_t rx_fifo_atn_show(struct device *dev,
+				struct device_attribute *attr,
+				char *buf)
+{
+	struct tegra_audio_platform_data *pdata = dev->platform_data;
+	struct audio_driver_state *ads = pdata->driver_data;
+	return __attr_fifo_atn_read(buf, ads->in.i2s_fifo_atn_level);
+}
+
+static ssize_t rx_fifo_atn_store(struct device *dev,
+			struct device_attribute *attr,
+			const char *buf, size_t count)
+{
+	struct tegra_audio_platform_data *pdata = dev->platform_data;
+	struct audio_driver_state *ads = pdata->driver_data;
+	return __attr_fifo_atn_write(ads, &ads->in,
+			&ads->in.i2s_fifo_atn_level, buf, count);
+}
+
+static DEVICE_ATTR(rx_fifo_atn, 0644, rx_fifo_atn_show, rx_fifo_atn_store);
+
 static int tegra_audio_probe(struct platform_device *pdev)
 {
+	int rc;
 	struct resource *res;
 	struct clk *i2s_clk, *audio_sync_clk, *dap_mclk;
 	struct audio_driver_state *state;
@@ -1632,6 +2026,7 @@ static int tegra_audio_probe(struct platform_device *pdev)
 
 	state->pdev = pdev;
 	state->pdata = pdev->dev.platform_data;
+	state->pdata->driver_data = state;
 	BUG_ON(!state->pdata);
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
@@ -1653,6 +2048,9 @@ static int tegra_audio_probe(struct platform_device *pdev)
 		return -EIO;
 	}
 
+	state->out.i2s_fifo_atn_level = I2S_FIFO_ATN_LVL_FOUR_SLOTS;
+	state->in.i2s_fifo_atn_level = I2S_FIFO_ATN_LVL_FOUR_SLOTS;
+
 	res = platform_get_resource(pdev, IORESOURCE_DMA, 0);
 	if (!res) {
 		dev_err(&pdev->dev, "no dma resource!\n");
@@ -1671,32 +2069,38 @@ static int tegra_audio_probe(struct platform_device *pdev)
 
 	i2s_clk = clk_get(&pdev->dev, NULL);
 	if (!i2s_clk) {
-		pr_err("%s: could not get i2s1 clock\n", __func__);
+		dev_err(&pdev->dev, "%s: could not get i2s1 clock\n",
+			__func__);
 		return -EIO;
 	}
 
 	clk_set_rate(i2s_clk, state->pdata->i2s_clk_rate);
 	if (clk_enable(i2s_clk)) {
-		pr_err("%s: failed to enable i2s1 clock\n", __func__);
+		dev_err(&pdev->dev, "%s: failed to enable i2s1 clock\n",
+			__func__);
 		return -EIO;
 	}
 	pr_info("%s: i2s_clk rate %ld\n", __func__, clk_get_rate(i2s_clk));
 
 	dap_mclk = tegra_get_clock_by_name(state->pdata->dap_clk);
 	if (!dap_mclk) {
-		pr_err("%s: could not get DAP clock\n", __func__);
+		dev_err(&pdev->dev, "%s: could not get DAP clock\n",
+			__func__);
 		return -EIO;
 	}
 	clk_enable(dap_mclk);
 
 	audio_sync_clk = tegra_get_clock_by_name(state->pdata->audio_sync_clk);
 	if (!audio_sync_clk) {
-		pr_err("%s: could not get audio_2x clock\n", __func__);
+		dev_err(&pdev->dev, "%s: could not get audio_2x clock\n",
+			__func__);
 		return -EIO;
 	}
 	clk_enable(audio_sync_clk);
 
 	/* disable interrupts from I2S */
+	i2s_fifo_clear(state->i2s_base, I2S_FIFO_TX);
+	i2s_fifo_clear(state->i2s_base, I2S_FIFO_RX);
 	i2s_enable_fifos(state->i2s_base, 0);
 
 	i2s_set_left_right_control_polarity(state->i2s_base, 0); /* default */
@@ -1717,6 +2121,7 @@ static int tegra_audio_probe(struct platform_device *pdev)
 	state->out.active = false;
 	mutex_init(&state->out.lock);
 	init_completion(&state->out.fifo_completion);
+	init_completion(&state->out.stop_completion);
 	spin_lock_init(&state->out.dma_req_lock);
 	state->out.buf_phys = 0;
 	state->out.dma_chan = NULL;
@@ -1726,74 +2131,91 @@ static int tegra_audio_probe(struct platform_device *pdev)
 	state->in.active = false;
 	mutex_init(&state->in.lock);
 	init_completion(&state->in.fifo_completion);
+	init_completion(&state->in.stop_completion);
 	spin_lock_init(&state->in.dma_req_lock);
 	state->in.buf_phys = 0;
 	state->in.dma_chan = NULL;
 	state->in.dma_has_it = false;
 
-	state->out.buffer = kmalloc(PCM_OUT_BUFFER_SIZE, GFP_KERNEL | GFP_DMA);
-	if (!state->out.buffer) {
-		pr_err("%s: could not allocate output buffer\n", __func__);
-		return -ENOMEM;
-	}
+	state->out.buffer = 0;
+	state->out.buf_config.size = PCM_BUFFER_MAX_SIZE_ORDER;
+	state->out.buf_config.threshold = PCM_BUFFER_THRESHOLD_ORDER;
+	state->out.buf_config.chunk = PCM_BUFFER_DMA_CHUNK_SIZE_ORDER;
+	rc = init_stream_buffer(&state->out, &state->out.buf_config, 0);
+	if (rc < 0)
+		return rc;
 
-	state->in.buffer = kmalloc(PCM_IN_BUFFER_SIZE + PCM_IN_BUFFER_PADDING,
-					GFP_KERNEL | GFP_DMA);
-	if (!state->in.buffer) {
-		pr_err("%s: could not allocate input buffer\n", __func__);
-		return -ENOMEM;
-	}
-
-	kfifo_init(&state->out.fifo, state->out.buffer,
-			PCM_OUT_BUFFER_SIZE);
-
-	kfifo_init(&state->in.fifo, state->in.buffer,
-			PCM_IN_BUFFER_SIZE);
+	state->in.buffer = 0;
+	state->in.buf_config.size = PCM_BUFFER_MAX_SIZE_ORDER;
+	state->in.buf_config.threshold = PCM_BUFFER_THRESHOLD_ORDER;
+	state->in.buf_config.chunk = PCM_BUFFER_DMA_CHUNK_SIZE_ORDER;
+	rc = init_stream_buffer(&state->in, &state->in.buf_config,
+			PCM_IN_BUFFER_PADDING);
+	if (rc < 0)
+		return rc;
 
 	if (request_irq(state->irq, i2s_interrupt,
 			IRQF_DISABLED, state->pdev->name, state) < 0) {
-		pr_err("%s: could not register handler for irq %d\n",
+		dev_err(&pdev->dev,
+			"%s: could not register handler for irq %d\n",
 			__func__, state->irq);
 		return -EIO;
 	}
 
-	memset(&state->misc_out, 0, sizeof(state->misc_out));
-	state->misc_out.minor = MISC_DYNAMIC_MINOR;
-	state->misc_out.name  = kmalloc(sizeof("audio_out") + 1, GFP_KERNEL);
-	if (!state->misc_out.name)
-		return -ENOMEM;
-	snprintf((char *)state->misc_out.name, sizeof("audio_out") + 1,
+	rc = setup_misc_device(&state->misc_out,
+			&tegra_audio_out_fops,
 			"audio%d_out", state->pdev->id);
-	state->misc_out.fops = &tegra_audio_out_fops;
-	if (misc_register(&state->misc_out)) {
-		pr_err("%s: could not register audio_out\n", __func__);
-		return -EIO;
-	}
+	if (rc < 0)
+		return rc;
 
-	memset(&state->misc_in, 0, sizeof(state->misc_in));
-	state->misc_in.minor = MISC_DYNAMIC_MINOR;
-	state->misc_in.name  = kmalloc(sizeof("audio_in") + 1, GFP_KERNEL);
-	if (!state->misc_in.name)
-		return -ENOMEM;
-	snprintf((char *)state->misc_in.name, sizeof("audio_in") + 1,
+	rc = setup_misc_device(&state->misc_out_ctl,
+			&tegra_audio_out_ctl_fops,
+			"audio%d_out_ctl", state->pdev->id);
+	if (rc < 0)
+		return rc;
+
+	rc = setup_misc_device(&state->misc_in,
+			&tegra_audio_in_fops,
 			"audio%d_in", state->pdev->id);
-	state->misc_in.fops = &tegra_audio_in_fops;
-	if (misc_register(&state->misc_in)) {
-		pr_err("%s: could not register audio_in\n", __func__);
-		return -EIO;
-	}
+	if (rc < 0)
+		return rc;
+
+	rc = setup_misc_device(&state->misc_in_ctl,
+			&tegra_audio_in_ctl_fops,
+			"audio%d_in_ctl", state->pdev->id);
+	if (rc < 0)
+		return rc;
 
 	state->using_dma = state->pdata->dma_on;
 	if (!state->using_dma)
 		sound_ops = &pio_sound_ops;
 	sound_ops->setup(state);
 
+	rc = device_create_file(&pdev->dev, &dev_attr_dma_toggle);
+	if (rc < 0) {
+		dev_err(&pdev->dev, "%s: could not create sysfs entry %s: %d\n",
+			__func__, dev_attr_dma_toggle.attr.name, rc);
+		return rc;
+	}
+
+	rc = device_create_file(&pdev->dev, &dev_attr_tx_fifo_atn);
+	if (rc < 0) {
+		dev_err(&pdev->dev, "%s: could not create sysfs entry %s: %d\n",
+			__func__, dev_attr_tx_fifo_atn.attr.name, rc);
+		return rc;
+	}
+
+	rc = device_create_file(&pdev->dev, &dev_attr_rx_fifo_atn);
+	if (rc < 0) {
+		dev_err(&pdev->dev, "%s: could not create sysfs entry %s: %d\n",
+			__func__, dev_attr_rx_fifo_atn.attr.name, rc);
+		return rc;
+	}
+
 	state->in_config.rate = 11025;
 	state->in_config.stereo = false;
 	state->in_divs = divs_11025;
 	state->in_divs_len = ARRAY_SIZE(divs_11025);
-
-	setup_tegra_audio_debugfs(state);
 
 	return 0;
 }
