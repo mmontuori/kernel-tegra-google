@@ -385,6 +385,7 @@ config MMC_TMIO
 config MMC_SDHCI_TEGRA
 	tristate "Tegra SD/MMC Controller Support"
 	depends on ARCH_TEGRA && MMC_SDHCI
+	select MMC_SDHCI_IO_ACCESSORS
 	help
 	  This selects the Tegra SD/MMC controller.
 

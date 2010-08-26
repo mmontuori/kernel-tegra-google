@@ -35,6 +35,56 @@ struct tegra_sdhci_host {
 	struct clk *clk;
 };
 
+
+static u32 tegra_sdhci_readl(struct sdhci_host *host, int reg)
+{
+	u32 val;
+
+	if (unlikely(reg == SDHCI_PRESENT_STATE)) {
+		/* FIXME: Use wp_gpio here instead */
+		val = readl(host->ioaddr + reg);
+		return val | SDHCI_WRITE_PROTECT;
+	}
+
+	return readl(host->ioaddr + reg);
+}
+
+
+static u16 tegra_sdhci_readw(struct sdhci_host *host, int reg)
+{
+	if (unlikely(reg == SDHCI_HOST_VERSION)) {
+		/* Erratum: Version register is invalid in HW. */
+		return SDHCI_SPEC_200;
+	}
+
+	return readw(host->ioaddr + reg);
+}
+
+static void tegra_sdhci_writel(struct sdhci_host *host, u32 val, int reg)
+{
+	writel(val, host->ioaddr + reg);
+	if (unlikely(reg == SDHCI_INT_ENABLE)) {
+		/* Erratum: Must enable block gap interrupt detection */
+		u8 gap_ctrl = readb(host->ioaddr + SDHCI_BLOCK_GAP_CONTROL);
+		if (val & SDHCI_INT_CARD_INT)
+			gap_ctrl |= 0x8;
+		else
+			gap_ctrl &= ~0x8;
+		writeb(gap_ctrl, host->ioaddr + SDHCI_BLOCK_GAP_CONTROL);
+	}
+}
+
+static void tegra_sdhci_writeb(struct sdhci_host *host, u8 val, int reg)
+{
+	if (unlikely(reg == SDHCI_HOST_CONTROL))  {
+		/* Never enable SDHCI_CTRL_HISPD */
+		val &= ~SDHCI_CTRL_HISPD;
+	}
+
+	writeb(val, host->ioaddr + reg);
+}
+
+
 static irqreturn_t carddetect_irq(int irq, void *data)
 {
 	struct sdhci_host *sdhost = (struct sdhci_host *)data;
@@ -57,6 +107,10 @@ static void tegra_sdhci_set_clock(struct sdhci_host *host, unsigned int clock)
 static struct sdhci_ops tegra_sdhci_ops = {
 	.enable_dma = tegra_sdhci_enable_dma,
 	.set_clock  = tegra_sdhci_set_clock,
+	.read_l     = tegra_sdhci_readl,
+	.read_w     = tegra_sdhci_readw,
+	.write_l    = tegra_sdhci_writel,
+	.write_b    = tegra_sdhci_writeb,
 };
 
 static int __devinit tegra_sdhci_probe(struct platform_device *pdev)
@@ -108,9 +162,10 @@ static int __devinit tegra_sdhci_probe(struct platform_device *pdev)
 	sdhci->ops = &tegra_sdhci_ops;
 	sdhci->irq = irq;
 	sdhci->ioaddr = ioaddr;
-	sdhci->version = SDHCI_SPEC_200;
 	sdhci->quirks = SDHCI_QUIRK_BROKEN_TIMEOUT_VAL |
-			SDHCI_QUIRK_SINGLE_POWER_WRITE;
+			SDHCI_QUIRK_SINGLE_POWER_WRITE |
+			SDHCI_QUIRK_BROKEN_ADMA_ZEROLEN_DESC |
+			SDHCI_QUIRK_NO_SDIO_IRQ;
 
 	rc = sdhci_add_host(sdhci);
 	if (rc)
