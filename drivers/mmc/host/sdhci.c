@@ -1381,7 +1381,8 @@ static void sdhci_cmd_irq(struct sdhci_host *host, u32 intmask)
 		host->cmd->error = -EILSEQ;
 
 	if (host->cmd->error) {
-		tasklet_schedule(&host->finish_tasklet);
+		if (intmask & SDHCI_INT_RESPONSE)
+			tasklet_schedule(&host->finish_tasklet);
 		return;
 	}
 
