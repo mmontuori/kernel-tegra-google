@@ -483,8 +483,8 @@ config MFD_JANZ_CMODIO
 	  CAN and GPIO controllers.
 
 config MFD_TPS6586X
-	tristate "TPS6586x Power Management chips"
-	depends on I2C && GPIOLIB
+	bool "TPS6586x Power Management chips"
+	depends on I2C && GPIOLIB && GENERIC_HARDIRQS
 	select MFD_CORE
 	help
 	  If you say yes here you get support for the TPS6586X series of
