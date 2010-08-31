@@ -174,7 +174,17 @@
 
 #define FIQ_START			INT_GIC_BASE
 
-#define NR_IRQS				(INT_GPIO_BASE + INT_GPIO_NR)
+#ifdef CONFIG_MACH_VENTANA
+#define NR_BOARD_IRQS			2
+#endif
+
+#ifndef NR_BOARD_IRQS
+#define NR_BOARD_IRQS			0
+#endif
+
+#define TEGRA_NR_IRQS			(INT_GPIO_BASE + INT_GPIO_NR)
+
+#define NR_IRQS				(TEGRA_NR_IRQS + NR_BOARD_IRQS)
 #endif
 
 #endif
