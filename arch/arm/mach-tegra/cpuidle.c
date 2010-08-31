@@ -209,6 +209,12 @@ restart:
 		return;
 	}
 
+	/* TODO: sleeping for less than a jiffy breaks everything? */
+	if (request < 1000000 / HZ) {
+		tegra_flow_wfi(dev);
+		return;
+	}
+
 	/* Signal to CPU1 to tear down */
 	tegra_legacy_force_irq_set(TEGRA_CPUIDLE_TEAR_DOWN);
 
@@ -306,6 +312,13 @@ static void tegra_idle_enter_lp2_cpu1(struct cpuidle_device *dev,
 		 * Not enough time left to enter LP2
 		 * Signal to CPU0 that CPU1 rejects LP2, and stay in
 		 */
+		tegra_legacy_force_irq_clr(TEGRA_CPUIDLE_BOTH_IDLE);
+		tegra_flow_wfi(dev);
+		goto out;
+	}
+
+	/* TODO: sleeping for less than a jiffy breaks everything? */
+	if (request < 1000000 / HZ) {
 		tegra_legacy_force_irq_clr(TEGRA_CPUIDLE_BOTH_IDLE);
 		tegra_flow_wfi(dev);
 		goto out;
