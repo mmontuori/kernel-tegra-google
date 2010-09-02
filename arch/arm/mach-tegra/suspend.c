@@ -112,6 +112,22 @@ static struct clk *tegra_pclk = NULL;
 static const struct tegra_suspend_platform_data *pdata = NULL;
 static unsigned long wb0_restore = 0;
 
+unsigned long tegra_cpu_power_good_time(void)
+{
+	if (WARN_ON_ONCE(!pdata))
+		return 5000;
+
+	return pdata->cpu_timer;
+}
+
+unsigned long tegra_cpu_power_off_time(void)
+{
+	if (WARN_ON_ONCE(!pdata))
+		return 5000;
+
+	return pdata->cpu_off_timer;
+}
+
 enum tegra_suspend_mode tegra_get_suspend_mode(void)
 {
 	if (!pdata)
@@ -223,8 +239,9 @@ static noinline void suspend_cpu_complex(void)
 
 unsigned int tegra_suspend_lp2(unsigned int us)
 {
-	unsigned int mode, entry, exit;
+	unsigned int mode;
 	unsigned long orig, reg;
+	unsigned int remain;
 
 	reg = readl(pmc + PMC_CTRL);
 	mode = (reg >> TEGRA_POWER_PMC_SHIFT) & TEGRA_POWER_PMC_MASK;
@@ -252,16 +269,16 @@ unsigned int tegra_suspend_lp2(unsigned int us)
 
 	__cortex_a9_save(mode);
 	/* return from __cortex_a9_restore */
+	barrier();
 	restore_cpu_complex();
+
+	remain = tegra_lp2_timer_remain();
 	if (us)
 		tegra_lp2_set_trigger(0);
 
 	writel(orig, evp_reset);
 
-	entry = readl(pmc + PMC_SCRATCH38);
-	exit = readl(pmc + PMC_SCRATCH39);
-
-	return exit - entry;
+	return remain;
 }
 
 #ifdef CONFIG_PM
@@ -277,7 +294,6 @@ static void pmc_32kwritel(u32 val, unsigned long offs)
 static u8 *iram_save = NULL;
 static unsigned int iram_save_size = 0;
 static void __iomem *iram_code = IO_ADDRESS(TEGRA_IRAM_CODE_AREA);
-static void __iomem *iram_avp_resume = IO_ADDRESS(TEGRA_IRAM_BASE);
 
 static void tegra_suspend_dram(bool do_lp0)
 {
@@ -461,7 +477,7 @@ static int tegra_suspend_enter(suspend_state_t state)
 	u32 mc_data[2];
 	int irq;
 	bool do_lp0 = (pdata->suspend_mode == TEGRA_SUSPEND_LP0);
-	bool do_lp2 = (pdata->suspend_mode == TEGRA_SUSPEND_LP1);
+	bool do_lp2 = (pdata->suspend_mode == TEGRA_SUSPEND_LP2);
 	int lp_state;
 
 	if (do_lp2)
@@ -479,6 +495,7 @@ static int tegra_suspend_enter(suspend_state_t state)
 		tegra_dma_suspend();
 		tegra_debug_uart_suspend();
 		tegra_pinmux_suspend();
+		tegra_timer_suspend();
 		tegra_gpio_suspend();
 		tegra_clk_suspend();
 
@@ -514,6 +531,7 @@ static int tegra_suspend_enter(suspend_state_t state)
 
 		tegra_clk_resume();
 		tegra_gpio_resume();
+		tegra_timer_resume();
 		tegra_pinmux_resume();
 		tegra_debug_uart_resume();
 		tegra_dma_resume();
@@ -605,7 +623,7 @@ out:
 
 	/* Always enable CPU power request; just normal polarity is supported */
 	reg = readl(pmc + PMC_CTRL);
-	BUG_ON(reg & TEGRA_POWER_CPU_PWRREQ_POLARITY);
+	BUG_ON(reg & (TEGRA_POWER_CPU_PWRREQ_POLARITY << TEGRA_POWER_PMC_SHIFT));
 	reg |= (TEGRA_POWER_CPU_PWRREQ_OE << TEGRA_POWER_PMC_SHIFT);
 	pmc_32kwritel(reg, PMC_CTRL);
 

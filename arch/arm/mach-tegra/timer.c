@@ -95,7 +95,7 @@ static void tegra_timer_set_mode(enum clock_event_mode mode,
 }
 
 static u64 tegra_us_clocksource_offset;
-
+static u64 tegra_us_resume_offset;
 static cycle_t tegra_clocksource_us_read(struct clocksource *cs)
 {
 	return tegra_us_clocksource_offset +
@@ -104,14 +104,19 @@ static cycle_t tegra_clocksource_us_read(struct clocksource *cs)
 
 void tegra_clocksource_us_suspend(struct clocksource *cs)
 {
-	tegra_us_clocksource_offset = tegra_clocksource_us_read(cs);
+	tegra_us_resume_offset = tegra_clocksource_us_read(cs);
+}
+
+void tegra_clocksource_us_resume(struct clocksource *cs)
+{
+	tegra_us_clocksource_offset = tegra_us_resume_offset;
 }
 
 static cycle_t tegra_clocksource_32k_read(struct clocksource *cs)
 {
 	u32 ms = readl(rtc_base + RTC_MILLISECONDS);
 	u32 s = readl(rtc_base + RTC_SHADOW_SECONDS);
-	return cnt32_to_63(s * 1000 + ms);
+	return (u64)s * 1000 + ms;
 }
 
 static struct clock_event_device tegra_clockevent = {
@@ -127,6 +132,7 @@ static struct clocksource tegra_clocksource_us = {
 	.rating	= 300,
 	.read	= tegra_clocksource_us_read,
 	.suspend= tegra_clocksource_us_suspend,
+	.resume	= tegra_clocksource_us_resume,
 	.mask	= 0x7FFFFFFFFFFFFFFFULL,
 	.flags	= CLOCK_SOURCE_IS_CONTINUOUS,
 };
@@ -275,3 +281,19 @@ void tegra_lp2_set_trigger(unsigned long cycles)
 	}
 }
 EXPORT_SYMBOL(tegra_lp2_set_trigger);
+
+unsigned long tegra_lp2_timer_remain(void)
+{
+	return timer_readl(TIMER4_BASE + TIMER_PCR) & 0x1ffffffful;
+}
+
+static u32 usec_config;
+void tegra_timer_suspend(void)
+{
+	usec_config = timer_readl(TIMERUS_USEC_CFG);
+}
+
+void tegra_timer_resume(void)
+{
+	timer_writel(usec_config, TIMERUS_USEC_CFG);
+}

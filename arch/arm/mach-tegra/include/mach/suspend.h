@@ -43,6 +43,8 @@ struct tegra_suspend_platform_data {
 	enum tegra_suspend_mode suspend_mode;
 };
 
+unsigned long tegra_cpu_power_good_time(void);
+unsigned long tegra_cpu_power_off_time(void);
 enum tegra_suspend_mode tegra_get_suspend_mode(void);
 
 void __tegra_lp1_reset(void);
@@ -55,12 +57,14 @@ void tegra_irq_suspend(void);
 void tegra_gpio_suspend(void);
 void tegra_clk_suspend(void);
 void tegra_dma_suspend(void);
+void tegra_timer_suspend(void);
 
 void tegra_pinmux_resume(void);
 void tegra_irq_resume(void);
 void tegra_gpio_resume(void);
 void tegra_clk_resume(void);
 void tegra_dma_resume(void);
+void tegra_timer_resume(void);
 
 int tegra_irq_to_wake(int irq);
 int tegra_wake_to_irq(int wake);
