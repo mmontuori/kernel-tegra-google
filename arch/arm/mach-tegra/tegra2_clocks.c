@@ -1720,6 +1720,10 @@ struct clk_duplicate tegra_clk_duplicates[] = {
 	CLK_DUPLICATE("usbd", "tegra-ehci.0", NULL),
 	CLK_DUPLICATE("hdmi", "tegradc.0", "hdmi"),
 	CLK_DUPLICATE("hdmi", "tegradc.1", "hdmi"),
+	CLK_DUPLICATE("pwm", "tegra_pwm.0", NULL),
+	CLK_DUPLICATE("pwm", "tegra_pwm.1", NULL),
+	CLK_DUPLICATE("pwm", "tegra_pwm.2", NULL),
+	CLK_DUPLICATE("pwm", "tegra_pwm.3", NULL),
 };
 
 #define CLK(dev, con, ck)	\
