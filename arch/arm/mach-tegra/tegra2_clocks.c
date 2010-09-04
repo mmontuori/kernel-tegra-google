@@ -1388,6 +1388,15 @@ static struct clk tegra_dev1_clk = {
 	.max_rate  = 26000000,
 };
 
+/* dap_mclk2, belongs to the cdev2 pingroup. */
+static struct clk tegra_dev2_clk = {
+	.name      = "clk_dev2",
+	.ops       = &tegra_cdev_clk_ops,
+	.clk_num   = 93,
+	.rate      = 26000000,
+	.max_rate  = 26000000,
+};
+
 /* initialized before peripheral clocks */
 static struct clk_mux_sel mux_audio_sync_clk[8+1];
 static const struct audio_sources {
@@ -1642,7 +1651,7 @@ struct clk tegra_periph_clks[] = {
 	PERIPH_CLK("sdmmc1",	"sdhci-tegra.0",	NULL,	14,	0x150,	52000000,  mux_pllp_pllc_pllm_clkm,	MUX | DIV_U71), /* scales with voltage */
 	PERIPH_CLK("sdmmc2",	"sdhci-tegra.1",	NULL,	9,	0x154,	52000000,  mux_pllp_pllc_pllm_clkm,	MUX | DIV_U71), /* scales with voltage */
 	PERIPH_CLK("sdmmc3",	"sdhci-tegra.2",	NULL,	69,	0x1bc,	52000000,  mux_pllp_pllc_pllm_clkm,	MUX | DIV_U71), /* scales with voltage */
-	PERIPH_CLK("sdmmc4",	"sdhci-tegra.3",	NULL,	15,	0x160,	52000000,  mux_pllp_pllc_pllm_clkm,	MUX | DIV_U71), /* scales with voltage */
+	PERIPH_CLK("sdmmc4",	"sdhci-tegra.3",	NULL,	15,	0x164,	52000000,  mux_pllp_pllc_pllm_clkm,	MUX | DIV_U71), /* scales with voltage */
 	PERIPH_CLK("vde",	"vde",			NULL,	61,	0x1c8,	250000000, mux_pllp_pllc_pllm_clkm,	MUX | DIV_U71), /* scales with voltage and process_id */
 	PERIPH_CLK("csite",	"csite",		NULL,	73,	0x1d4,	144000000, mux_pllp_pllc_pllm_clkm,	MUX | DIV_U71), /* max rate ??? */
 	/* FIXME: what is la? */
@@ -1746,6 +1755,7 @@ struct clk_lookup tegra_clk_lookups[] = {
 	CLK(NULL,	"pclk",		&tegra_clk_pclk),
 	CLK(NULL,	"clk_d",	&tegra_clk_d),
 	CLK(NULL,	"clk_dev1",	&tegra_dev1_clk),
+	CLK(NULL,	"clk_dev2",	&tegra_dev2_clk),
 	CLK(NULL,	"cpu",		&tegra_clk_virtual_cpu),
 };
 
