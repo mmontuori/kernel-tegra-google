@@ -159,22 +159,6 @@ const char *__bdevname(dev_t dev, char *buffer)
 
 EXPORT_SYMBOL(__bdevname);
 
-void put_named_partition(struct parsed_partitions *p, int n, sector_t from,
-	sector_t size, const char *name, size_t name_size)
-{
-	if (n < p->limit) {
-		p->parts[n].from = from;
-		p->parts[n].size = size;
-		if (name) {
-			if (name_size > PART_NAME_SIZE - 1)
-				name_size = PART_NAME_SIZE - 1;
-			memcpy(p->parts[n].name, name, name_size);
-			p->parts[n].name[name_size] = 0;
-		}
-	}
-}
-EXPORT_SYMBOL(put_named_partition);
-
 static struct parsed_partitions *
 check_partition(struct gendisk *hd, struct block_device *bdev)
 {
@@ -292,13 +276,6 @@ ssize_t part_inflight_show(struct device *dev,
 	return sprintf(buf, "%8u %8u\n", p->in_flight[0], p->in_flight[1]);
 }
 
-ssize_t part_partition_name_show(struct device *dev,
-			struct device_attribute *attr, char *buf)
-{
-	struct hd_struct *p = dev_to_part(dev);
-	return sprintf(buf, "%s\n", p->partition_name);
-}
-
 #ifdef CONFIG_FAIL_MAKE_REQUEST
 ssize_t part_fail_show(struct device *dev,
 		       struct device_attribute *attr, char *buf)
@@ -330,8 +307,6 @@ static DEVICE_ATTR(discard_alignment, S_IRUGO, part_discard_alignment_show,
 		   NULL);
 static DEVICE_ATTR(stat, S_IRUGO, part_stat_show, NULL);
 static DEVICE_ATTR(inflight, S_IRUGO, part_inflight_show, NULL);
-static DEVICE_ATTR(partition_name, S_IRUGO, part_partition_name_show, NULL);
-
 #ifdef CONFIG_FAIL_MAKE_REQUEST
 static struct device_attribute dev_attr_fail =
 	__ATTR(make-it-fail, S_IRUGO|S_IWUSR, part_fail_show, part_fail_store);
@@ -345,7 +320,6 @@ static struct attribute *part_attrs[] = {
 	&dev_attr_discard_alignment.attr,
 	&dev_attr_stat.attr,
 	&dev_attr_inflight.attr,
-	&dev_attr_partition_name.attr,
 #ifdef CONFIG_FAIL_MAKE_REQUEST
 	&dev_attr_fail.attr,
 #endif
@@ -428,8 +402,7 @@ static DEVICE_ATTR(whole_disk, S_IRUSR | S_IRGRP | S_IROTH,
 		   whole_disk_show, NULL);
 
 struct hd_struct *add_partition(struct gendisk *disk, int partno,
-				sector_t start, sector_t len, int flags,
-				const char *name)
+				sector_t start, sector_t len, int flags)
 {
 	struct hd_struct *p;
 	dev_t devt = MKDEV(0, 0);
@@ -465,7 +438,6 @@ struct hd_struct *add_partition(struct gendisk *disk, int partno,
 	p->nr_sects = len;
 	p->partno = partno;
 	p->policy = get_disk_ro(disk);
-	strlcpy(p->partition_name, name, GENHD_PART_NAME_SIZE);
 
 	dname = dev_name(ddev);
 	if (isdigit(dname[strlen(dname) - 1]))
@@ -706,8 +678,7 @@ rescan:
 			}
 		}
 		part = add_partition(disk, p, from, size,
-				     state->parts[p].flags,
-				     state->parts[p].name);
+				     state->parts[p].flags);
 		if (IS_ERR(part)) {
 			printk(KERN_ERR " %s: p%d could not be added: %ld\n",
 			       disk->disk_name, p, -PTR_ERR(part));
