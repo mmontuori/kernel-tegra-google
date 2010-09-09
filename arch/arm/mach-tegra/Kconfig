@@ -67,6 +67,12 @@ config TEGRA_FIQ_DEBUGGER
 	help
 	  Enables the FIQ serial debugger on Tegra"
 
+config TEGRA_PWM
+	tristate "Enable PWM driver"
+	select HAVE_PWM
+	help
+	  Enable support for the Tegra PWM controller(s).
+
 endif
 
 config TEGRA_IOVMM_GART
