@@ -41,28 +41,6 @@
 #define ENABLE_ON_INIT		(1 << 28)
 
 struct clk;
-struct regulator;
-
-struct dvfs_table {
-	unsigned long rate;
-	int millivolts;
-};
-
-struct dvfs_process_id_table {
-	int process_id;
-	struct dvfs_table *table;
-};
-
-struct dvfs {
-	struct regulator *reg;
-	struct dvfs_table *table;
-	int max_millivolts;
-
-	int process_id_table_length;
-	const char *reg_id;
-	bool cpu;
-	struct dvfs_process_id_table process_id_table[];
-};
 
 struct clk_mux_sel {
 	struct clk	*input;
@@ -106,7 +84,9 @@ struct clk {
 	struct clk_ops			*ops;
 	struct clk			*parent;
 	struct clk_lookup		lookup;
+	unsigned long			dvfs_rate;
 	unsigned long			rate;
+	unsigned long			requested_rate;
 	unsigned long			max_rate;
 	u32				flags;
 	u32				refcnt;
@@ -142,7 +122,7 @@ struct clk {
 	struct clk			*main;
 	struct clk			*backup;
 
-	struct dvfs			*dvfs;
+	struct list_head		dvfs;
 };
 
 
@@ -170,5 +150,6 @@ int clk_set_parent_locked(struct clk *c, struct clk *parent);
 int clk_set_rate_locked(struct clk *c, unsigned long rate);
 int clk_reparent(struct clk *c, struct clk *parent);
 void tegra_clk_init_from_table(struct tegra_clk_init_table *table);
+void tegra_clk_set_dvfs_rates(void);
 
 #endif
