@@ -106,7 +106,7 @@ static struct regulator *get_device_regulator(struct device *dev)
 static int regulator_check_voltage(struct regulator_dev *rdev,
 				   int *min_uV, int *max_uV)
 {
-	BUG_ON(*min_uV > *max_uV);
+	struct regulator *regulator;
 
 	if (!rdev->constraints) {
 		printk(KERN_ERR "%s: no constraints for %s\n", __func__,
@@ -119,10 +119,15 @@ static int regulator_check_voltage(struct regulator_dev *rdev,
 		return -EPERM;
 	}
 
-	if (*max_uV > rdev->constraints->max_uV)
-		*max_uV = rdev->constraints->max_uV;
-	if (*min_uV < rdev->constraints->min_uV)
-		*min_uV = rdev->constraints->min_uV;
+	*max_uV = rdev->constraints->max_uV;
+	*min_uV = rdev->constraints->min_uV;
+
+	list_for_each_entry(regulator, &rdev->consumer_list, list) {
+		if (*max_uV > regulator->max_uV)
+			*max_uV = regulator->max_uV;
+		if (*min_uV < regulator->min_uV)
+			*min_uV = regulator->min_uV;
+	}
 
 	if (*min_uV > *max_uV)
 		return -EINVAL;
@@ -1008,6 +1013,8 @@ static struct regulator *create_regulator(struct regulator_dev *rdev,
 	if (regulator == NULL)
 		return NULL;
 
+	regulator->max_uV = INT_MAX;
+
 	mutex_lock(&rdev->mutex);
 	regulator->rdev = rdev;
 	list_add(&regulator->list, &rdev->consumer_list);
@@ -1599,6 +1606,7 @@ int regulator_set_voltage(struct regulator *regulator, int min_uV, int max_uV)
 {
 	struct regulator_dev *rdev = regulator->rdev;
 	int ret;
+	int old_min_uV, old_max_uV;
 
 	mutex_lock(&rdev->mutex);
 
@@ -1608,12 +1616,20 @@ int regulator_set_voltage(struct regulator *regulator, int min_uV, int max_uV)
 		goto out;
 	}
 
-	/* constraints check */
-	ret = regulator_check_voltage(rdev, &min_uV, &max_uV);
-	if (ret < 0)
-		goto out;
+	old_min_uV = regulator->min_uV;
+	old_max_uV = regulator->max_uV;
+
 	regulator->min_uV = min_uV;
 	regulator->max_uV = max_uV;
+
+	/* constraints check */
+	ret = regulator_check_voltage(rdev, &min_uV, &max_uV);
+	if (ret < 0) {
+		regulator->min_uV = old_min_uV;
+		regulator->max_uV = old_max_uV;
+		goto out;
+	}
+
 	ret = rdev->desc->ops->set_voltage(rdev, min_uV, max_uV);
 
 out:
