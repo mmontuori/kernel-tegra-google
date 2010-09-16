@@ -288,8 +288,8 @@ failed:
 	return ret;
 }
 
-static int __devinit tps6586x_probe(struct i2c_client *client,
-				    const struct i2c_device_id *id)
+static int __devinit tps6586x_i2c_probe(struct i2c_client *client,
+					const struct i2c_device_id *id)
 {
 	struct tps6586x_platform_data *pdata = client->dev.platform_data;
 	struct tps6586x *tps6586x;
@@ -336,7 +336,7 @@ err_add_devs:
 	return ret;
 }
 
-static int __devexit tps6586x_remove(struct i2c_client *client)
+static int __devexit tps6586x_i2c_remove(struct i2c_client *client)
 {
 	return 0;
 }
@@ -352,8 +352,8 @@ static struct i2c_driver tps6586x_driver = {
 		.name	= "tps6586x",
 		.owner	= THIS_MODULE,
 	},
-	.probe		= tps6586x_probe,
-	.remove		= __devexit_p(tps6586x_remove),
+	.probe		= tps6586x_i2c_probe,
+	.remove		= __devexit_p(tps6586x_i2c_remove),
 	.id_table	= tps6586x_id_table,
 };
 
