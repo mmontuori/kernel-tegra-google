@@ -34,6 +34,7 @@
 #include <linux/seq_file.h>
 #include <linux/slab.h>
 #include <linux/smp.h>
+#include <linux/suspend.h>
 #include <linux/tick.h>
 
 #include <asm/cacheflush.h>
@@ -59,6 +60,7 @@
 	(IO_ADDRESS(TEGRA_CLK_RESET_BASE) + 0x4c)
 
 static bool lp2_in_idle __read_mostly = true;
+static bool lp2_disabled_by_suspend;
 module_param(lp2_in_idle, bool, 0644);
 
 static s64 tegra_cpu1_idle_time;
@@ -402,7 +404,7 @@ static int tegra_idle_enter_lp2(struct cpuidle_device *dev,
 	ktime_t enter, exit;
 	s64 us;
 
-	if (!lp2_in_idle)
+	if (!lp2_in_idle || lp2_disabled_by_suspend)
 		return tegra_idle_enter_lp3(dev, state);
 
 	local_irq_disable();
@@ -491,6 +493,21 @@ static irqreturn_t tegra_cpuidle_irq(int irq, void *dev)
 	BUG();
 }
 
+static int tegra_cpuidle_pm_notify(struct notifier_block *nb,
+	unsigned long event, void *dummy)
+{
+	if (event == PM_SUSPEND_PREPARE)
+		lp2_disabled_by_suspend = true;
+	else if (event == PM_POST_SUSPEND)
+		lp2_disabled_by_suspend = false;
+
+	return NOTIFY_OK;
+}
+
+static struct notifier_block tegra_cpuidle_pm_notifier = {
+	.notifier_call = tegra_cpuidle_pm_notify,
+};
+
 static int __init tegra_cpuidle_init(void)
 {
 	unsigned int cpu;
@@ -537,6 +554,8 @@ static int __init tegra_cpuidle_init(void)
 	}
 
 	tegra_lp2_exit_latency = tegra_cpu_power_good_time();
+
+	register_pm_notifier(&tegra_cpuidle_pm_notifier);
 
 	return 0;
 }

@@ -134,12 +134,29 @@
 #define BUS_CLK_DISABLE			(1<<3)
 #define BUS_CLK_DIV_MASK		0x3
 
+#define PMC_CTRL			0x0
+ #define PMC_CTRL_BLINK_ENB		(1 << 7)
+
+#define PMC_DPD_PADS_ORIDE		0x1c
+ #define PMC_DPD_PADS_ORIDE_BLINK_ENB	(1 << 20)
+
+#define PMC_BLINK_TIMER_DATA_ON_SHIFT	0
+#define PMC_BLINK_TIMER_DATA_ON_MASK	0x7fff
+#define PMC_BLINK_TIMER_ENB		(1 << 15)
+#define PMC_BLINK_TIMER_DATA_OFF_SHIFT	16
+#define PMC_BLINK_TIMER_DATA_OFF_MASK	0xffff
+
 static void __iomem *reg_clk_base = IO_ADDRESS(TEGRA_CLK_RESET_BASE);
+static void __iomem *reg_pmc_base = IO_ADDRESS(TEGRA_PMC_BASE);
 
 #define clk_writel(value, reg) \
 	__raw_writel(value, (u32)reg_clk_base + (reg))
 #define clk_readl(reg) \
 	__raw_readl((u32)reg_clk_base + (reg))
+#define pmc_writel(value, reg) \
+	__raw_writel(value, (u32)reg_pmc_base + (reg))
+#define pmc_readl(reg) \
+	__raw_readl((u32)reg_pmc_base + (reg))
 
 unsigned long clk_measure_input_freq(void)
 {
@@ -430,6 +447,87 @@ static struct clk_ops tegra_bus_ops = {
 	.enable			= tegra2_bus_clk_enable,
 	.disable		= tegra2_bus_clk_disable,
 	.set_rate		= tegra2_bus_clk_set_rate,
+};
+
+/* Blink output functions */
+
+static void tegra2_blink_clk_init(struct clk *c)
+{
+	u32 val;
+
+	val = pmc_readl(PMC_CTRL);
+	c->state = (val & PMC_CTRL_BLINK_ENB) ? ON : OFF;
+	c->mul = 1;
+	val = pmc_readl(c->reg);
+
+	if (val & PMC_BLINK_TIMER_ENB) {
+		unsigned int on_off;
+
+		on_off = (val >> PMC_BLINK_TIMER_DATA_ON_SHIFT) &
+			PMC_BLINK_TIMER_DATA_ON_MASK;
+		val >>= PMC_BLINK_TIMER_DATA_OFF_SHIFT;
+		val &= PMC_BLINK_TIMER_DATA_OFF_MASK;
+		on_off += val;
+		/* each tick in the blink timer is 4 32KHz clocks */
+		c->div = on_off * 4;
+	} else {
+		c->div = 1;
+	}
+}
+
+static int tegra2_blink_clk_enable(struct clk *c)
+{
+	u32 val;
+
+	val = pmc_readl(PMC_DPD_PADS_ORIDE);
+	pmc_writel(val | PMC_DPD_PADS_ORIDE_BLINK_ENB, PMC_DPD_PADS_ORIDE);
+
+	val = pmc_readl(PMC_CTRL);
+	pmc_writel(val | PMC_CTRL_BLINK_ENB, PMC_CTRL);
+
+	return 0;
+}
+
+static void tegra2_blink_clk_disable(struct clk *c)
+{
+	u32 val;
+
+	val = pmc_readl(PMC_CTRL);
+	pmc_writel(val & ~PMC_CTRL_BLINK_ENB, PMC_CTRL);
+
+	val = pmc_readl(PMC_DPD_PADS_ORIDE);
+	pmc_writel(val & ~PMC_DPD_PADS_ORIDE_BLINK_ENB, PMC_DPD_PADS_ORIDE);
+}
+
+static int tegra2_blink_clk_set_rate(struct clk *c, unsigned long rate)
+{
+	if (rate >= c->parent->rate) {
+		c->div = 1;
+		pmc_writel(0, c->reg);
+	} else {
+		unsigned int on_off;
+		u32 val;
+
+		on_off = DIV_ROUND_UP(c->parent->rate / 8, rate);
+		c->div = on_off * 8;
+
+		val = (on_off & PMC_BLINK_TIMER_DATA_ON_MASK) <<
+			PMC_BLINK_TIMER_DATA_ON_SHIFT;
+		on_off &= PMC_BLINK_TIMER_DATA_OFF_MASK;
+		on_off <<= PMC_BLINK_TIMER_DATA_OFF_SHIFT;
+		val |= on_off;
+		val |= PMC_BLINK_TIMER_ENB;
+		pmc_writel(val, c->reg);
+	}
+
+	return 0;
+}
+
+static struct clk_ops tegra_blink_clk_ops = {
+	.init			= &tegra2_blink_clk_init,
+	.enable			= &tegra2_blink_clk_enable,
+	.disable		= &tegra2_blink_clk_disable,
+	.set_rate		= &tegra2_blink_clk_set_rate,
 };
 
 /* PLL Functions */
@@ -1537,6 +1635,14 @@ static struct clk tegra_clk_pclk = {
 	.max_rate       = 108000000,
 };
 
+static struct clk tegra_clk_blink = {
+	.name		= "blink",
+	.parent		= &tegra_clk_32k,
+	.reg		= 0x40,
+	.ops		= &tegra_blink_clk_ops,
+	.max_rate	= 32768,
+};
+
 static struct clk_mux_sel mux_pllm_pllc_pllp_plla[] = {
 	{ .input = &tegra_pll_m, .value = 0},
 	{ .input = &tegra_pll_c, .value = 1},
@@ -1761,6 +1867,7 @@ struct clk_lookup tegra_clk_lookups[] = {
 	CLK(NULL,	"clk_dev1",	&tegra_dev1_clk),
 	CLK(NULL,	"clk_dev2",	&tegra_dev2_clk),
 	CLK(NULL,	"cpu",		&tegra_clk_virtual_cpu),
+	CLK(NULL,	"blink",	&tegra_clk_blink),
 };
 
 void __init tegra2_init_clocks(void)
