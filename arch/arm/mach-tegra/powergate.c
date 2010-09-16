@@ -66,7 +66,7 @@ static int tegra_powergate_set(int id, bool new_state)
 		return -EINVAL;
 	}
 
-	pmc_write(PWRGATE_TOGGLE, PWRGATE_TOGGLE_START | id);
+	pmc_write(PWRGATE_TOGGLE_START | id, PWRGATE_TOGGLE);
 
 	spin_unlock_irqrestore(&tegra_powergate_lock, flags);
 
@@ -102,10 +102,23 @@ bool tegra_powergate_is_powered(int id)
 
 int tegra_powergate_remove_clamping(int id)
 {
+	u32 mask;
+
 	if (id < 0 || id >= TEGRA_NUM_POWERGATE)
 		return -EINVAL;
 
-	pmc_write(REMOVE_CLAMPING, 1 << id);
+	/*
+	 * Tegra 2 has a bug where PCIE and VDE clamping masks are
+	 * swapped relatively to the partition ids
+	 */
+	if (id ==  TEGRA_POWERGATE_VDEC)
+		mask = (1 << TEGRA_POWERGATE_PCIE);
+	else if	(id == TEGRA_POWERGATE_PCIE)
+		mask = (1 << TEGRA_POWERGATE_VDEC);
+	else
+		mask = (1 << id);
+
+	pmc_write(mask, REMOVE_CLAMPING);
 
 	return 0;
 }
