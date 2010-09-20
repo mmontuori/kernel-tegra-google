@@ -388,12 +388,15 @@ static int tegra_idle_enter_lp3(struct cpuidle_device *dev,
 	s64 us;
 
 	local_irq_disable();
+	local_fiq_disable();
 
 	enter = ktime_get();
 	if (!need_resched())
 		tegra_flow_wfi(dev);
 	exit = ktime_sub(ktime_get(), enter);
 	us = ktime_to_us(exit);
+
+	local_fiq_enable();
 	local_irq_enable();
 	return (int)us;
 }
@@ -408,6 +411,7 @@ static int tegra_idle_enter_lp2(struct cpuidle_device *dev,
 		return tegra_idle_enter_lp3(dev, state);
 
 	local_irq_disable();
+	local_fiq_disable();
 	enter = ktime_get();
 
 	idle_stats.cpu_ready_count[dev->cpu]++;
@@ -420,6 +424,7 @@ static int tegra_idle_enter_lp2(struct cpuidle_device *dev,
 	exit = ktime_sub(ktime_get(), enter);
 	us = ktime_to_us(exit);
 
+	local_fiq_enable();
 	local_irq_enable();
 
 	/* cpu clockevents may have been reset by powerdown */
