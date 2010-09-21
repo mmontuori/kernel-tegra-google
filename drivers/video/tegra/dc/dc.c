@@ -709,6 +709,8 @@ static void tegra_dc_init(struct tegra_dc *dc)
 	tegra_dc_writel(dc, 0x0001c702, DC_CMD_INT_MASK);
 	tegra_dc_writel(dc, 0x0001c700, DC_CMD_INT_ENABLE);
 
+	tegra_dc_writel(dc, 0x00000000, DC_DISP_BORDER_COLOR);
+
 	if (dc->mode.pclk)
 		tegra_dc_program_mode(dc, &dc->mode);
 }
@@ -729,6 +731,9 @@ static void _tegra_dc_enable(struct tegra_dc *dc)
 
 	if (dc->out_ops && dc->out_ops->enable)
 		dc->out_ops->enable(dc);
+
+	/* force a full blending update */
+	dc->blend.z[0] = -1;
 }
 
 void tegra_dc_enable(struct tegra_dc *dc)
@@ -958,20 +963,11 @@ static int tegra_dc_suspend(struct nvhost_device *ndev, pm_message_t state)
 static int tegra_dc_resume(struct nvhost_device *ndev)
 {
 	struct tegra_dc *dc = nvhost_get_drvdata(ndev);
-	struct tegra_dc_win *wins[DC_N_WINDOWS];
-	int i;
 
 	dev_info(&ndev->dev, "resume\n");
 
-	if (dc->enabled) {
-		for (i = 0; i < dc->n_windows; i++)
-			wins[i] = &dc->windows[i];
-
+	if (dc->enabled)
 		_tegra_dc_enable(dc);
-		/* force a full blending update */
-		dc->blend.z[0] = -1;
-		tegra_dc_update_windows(wins, dc->n_windows);
-	}
 
 	return 0;
 }
