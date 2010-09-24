@@ -57,6 +57,7 @@
 #define	DRIVER_VERSION	"Apr 20, 2007"
 
 #define	DMA_ADDR_INVALID	(~(dma_addr_t)0)
+#define	STATUS_BUFFER_SIZE	8
 
 #ifdef CONFIG_ARCH_TEGRA
 static const char driver_name[] = "fsl-tegra-udc";
@@ -1351,6 +1352,10 @@ static void ch9getstatus(struct fsl_udc *udc, u8 request_type, u16 value,
 	req->req.complete = NULL;
 	req->dtd_count = 0;
 
+	dma_sync_single_for_device(udc->gadget.dev.parent,
+				req->req.dma, req->req.length,
+				DMA_TO_DEVICE);
+
 	/* prime the data phase */
 	if ((fsl_req_to_dtd(req) == 0))
 		fsl_queue_td(ep, req);
@@ -2331,8 +2336,15 @@ static int __init struct_udc_setup(struct fsl_udc *udc,
 	udc->status_req = container_of(fsl_alloc_request(NULL, GFP_KERNEL),
 			struct fsl_req, req);
 	/* allocate a small amount of memory to get valid address */
-	udc->status_req->req.buf = kmalloc(8, GFP_KERNEL);
-	udc->status_req->req.dma = virt_to_phys(udc->status_req->req.buf);
+	udc->status_req->req.buf = dma_alloc_coherent(&pdev->dev,
+				STATUS_BUFFER_SIZE, &udc->status_req->req.dma,
+				GFP_KERNEL);
+	if (!udc->status_req->req.buf) {
+		ERR("alloc status_req buffer failed\n");
+		dma_free_coherent(&pdev->dev, size, udc->ep_qh, udc->ep_qh_dma);
+		kfree(udc->eps);
+		return -ENOMEM;
+	}
 
 	udc->resume_state = USB_STATE_NOTATTACHED;
 	udc->usb_state = USB_STATE_POWERED;
@@ -2592,7 +2604,9 @@ static int __exit fsl_udc_remove(struct platform_device *pdev)
 	remove_proc_file();
 
 	/* Free allocated memory */
-	kfree(udc_controller->status_req->req.buf);
+	dma_free_coherent(&pdev->dev, STATUS_BUFFER_SIZE,
+				udc_controller->status_req->req.buf,
+				udc_controller->status_req->req.dma);
 	kfree(udc_controller->status_req);
 	kfree(udc_controller->eps);
 
