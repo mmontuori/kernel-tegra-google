@@ -140,14 +140,19 @@ enum tegra_suspend_mode tegra_get_suspend_mode(void)
 	return pdata->suspend_mode;
 }
 
-static void set_power_timers(unsigned long us_on, unsigned long us_off)
+static void set_power_timers(unsigned long us_on, unsigned long us_off,
+			     long rate)
 {
 	static int last_pclk = 0;
 	unsigned long long ticks;
 	unsigned long long pclk;
 
-	pclk = clk_get_rate(tegra_pclk);
-	if (pclk != last_pclk) {
+	if (WARN_ON_ONCE(rate <= 0))
+		pclk = 100000000;
+	else
+		pclk = rate;
+
+	if (rate != last_pclk) {
 		ticks = (us_on * pclk) + 999999ull;
 		do_div(ticks, 1000000);
 		writel((unsigned long)ticks, pmc + PMC_CPUPWRGOOD_TIMER);
@@ -259,7 +264,8 @@ unsigned int tegra_suspend_lp2(unsigned int us)
 	orig = readl(evp_reset);
 	writel(virt_to_phys(tegra_lp2_startup), evp_reset);
 
-	set_power_timers(pdata->cpu_timer, pdata->cpu_off_timer);
+	set_power_timers(pdata->cpu_timer, pdata->cpu_off_timer,
+			 clk_get_rate(tegra_pclk));
 
 	if (us)
 		tegra_lp2_set_trigger(us);
@@ -301,10 +307,6 @@ static void __iomem *iram_code = IO_ADDRESS(TEGRA_IRAM_CODE_AREA);
 
 static void tegra_suspend_dram(bool do_lp0)
 {
-	static unsigned long cpu_timer_32k = 0;
-	static unsigned long cpu_off_timer_32k = 0;
-
-	unsigned int on_timer, off_timer;
 	unsigned int mode = TEGRA_POWER_SDRAM_SELFREFRESH;
 	unsigned long orig, reg;
 
@@ -313,19 +315,7 @@ static void tegra_suspend_dram(bool do_lp0)
 	memcpy(iram_save, iram_code, iram_save_size);
 	memcpy(iram_code, (void *)__tegra_lp1_reset, iram_save_size);
 
-	if (!cpu_timer_32k) {
-		unsigned long long temp = 32768ull*pdata->cpu_timer + 999999;
-		do_div(temp, 1000000ul);
-		cpu_timer_32k = temp;
-
-		temp = 32768ull*pdata->cpu_off_timer + 999999;
-		do_div(temp, 1000000ul);
-		cpu_off_timer_32k = temp;
-	}
-	on_timer = readl(pmc + PMC_CPUPWRGOOD_TIMER);
-	writel(cpu_timer_32k, pmc + PMC_CPUPWRGOOD_TIMER);
-	off_timer = readl(pmc + PMC_CPUPWROFF_TIMER);
-	writel(cpu_off_timer_32k, pmc + PMC_CPUPWROFF_TIMER);
+	set_power_timers(pdata->cpu_timer, pdata->cpu_off_timer, 32768);
 
 	reg = readl(pmc + PMC_CTRL);
 	mode |= ((reg >> TEGRA_POWER_PMC_SHIFT) & TEGRA_POWER_PMC_MASK);
@@ -374,8 +364,6 @@ static void tegra_suspend_dram(bool do_lp0)
 
 	writel(orig, evp_reset);
 	outer_restart();
-	writel(on_timer, pmc + PMC_CPUPWRGOOD_TIMER);
-	writel(off_timer, pmc + PMC_CPUPWROFF_TIMER);
 
 	if (!do_lp0) {
 		memcpy(iram_code, iram_save, iram_save_size);
