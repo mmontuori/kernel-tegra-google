@@ -147,8 +147,7 @@ static struct clocksource tegra_clocksource_32k = {
 
 unsigned long long sched_clock(void)
 {
-	return clocksource_cyc2ns(tegra_clocksource_us.read(&tegra_clocksource_us),
-		tegra_clocksource_us.mult, tegra_clocksource_us.shift);
+	return tegra_clocksource_us.read(&tegra_clocksource_us) * 1000;
 }
 
 /**
