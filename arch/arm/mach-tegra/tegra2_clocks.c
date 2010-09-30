@@ -1090,7 +1090,6 @@ static void tegra2_cdev_clk_init(struct clk *c)
 {
 	/* We could un-tristate the cdev1 or cdev2 pingroup here; this is
 	 * currently done in the pinmux code. */
-	pr_info("%s: %s\n", __func__, c->name);
 	c->state = ON;
 	if (!(clk_readl(CLK_OUT_ENB + PERIPH_CLK_TO_ENB_REG(c)) &
 			PERIPH_CLK_TO_ENB_BIT(c)))
@@ -1099,7 +1098,6 @@ static void tegra2_cdev_clk_init(struct clk *c)
 
 static int tegra2_cdev_clk_enable(struct clk *c)
 {
-	pr_info("%s: %s\n", __func__, c->name);
 	clk_writel(PERIPH_CLK_TO_ENB_BIT(c),
 		CLK_OUT_ENB_SET + PERIPH_CLK_TO_ENB_SET_REG(c));
 	return 0;
@@ -1107,7 +1105,6 @@ static int tegra2_cdev_clk_enable(struct clk *c)
 
 static void tegra2_cdev_clk_disable(struct clk *c)
 {
-	pr_info("%s: %s\n", __func__, c->name);
 	clk_writel(PERIPH_CLK_TO_ENB_BIT(c),
 		CLK_OUT_ENB_CLR + PERIPH_CLK_TO_ENB_SET_REG(c));
 }
