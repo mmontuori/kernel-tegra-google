@@ -126,6 +126,8 @@ struct tegra_dma_channel {
 
 #define  NV_DMA_MAX_CHANNELS  32
 
+static DEFINE_MUTEX(tegra_dma_lock);
+
 static DECLARE_BITMAP(channel_usage, NV_DMA_MAX_CHANNELS);
 static struct tegra_dma_channel dma_channels[NV_DMA_MAX_CHANNELS];
 
@@ -143,6 +145,9 @@ EXPORT_SYMBOL(tegra_dma_flush);
 void tegra_dma_dequeue(struct tegra_dma_channel *ch)
 {
 	struct tegra_dma_req *req;
+
+	if (tegra_dma_is_empty(ch))
+		return;
 
 	req = list_entry(ch->list.next, typeof(*req), node);
 
@@ -336,7 +341,9 @@ EXPORT_SYMBOL(tegra_dma_enqueue_req);
 struct tegra_dma_channel *tegra_dma_allocate_channel(int mode)
 {
 	int channel;
-	struct tegra_dma_channel *ch;
+	struct tegra_dma_channel *ch = NULL;;
+
+	mutex_lock(&tegra_dma_lock);
 
 	/* first channel is the shared channel */
 	if (mode & TEGRA_DMA_SHARED) {
@@ -345,11 +352,14 @@ struct tegra_dma_channel *tegra_dma_allocate_channel(int mode)
 		channel = find_first_zero_bit(channel_usage,
 			ARRAY_SIZE(dma_channels));
 		if (channel >= ARRAY_SIZE(dma_channels))
-			return NULL;
+			goto out;
 	}
 	__set_bit(channel, channel_usage);
 	ch = &dma_channels[channel];
 	ch->mode = mode;
+
+out:
+	mutex_unlock(&tegra_dma_lock);
 	return ch;
 }
 EXPORT_SYMBOL(tegra_dma_allocate_channel);
@@ -359,7 +369,9 @@ void tegra_dma_free_channel(struct tegra_dma_channel *ch)
 	if (ch->mode & TEGRA_DMA_SHARED)
 		return;
 	tegra_dma_cancel(ch);
+	mutex_lock(&tegra_dma_lock);
 	__clear_bit(ch->id, channel_usage);
+	mutex_unlock(&tegra_dma_lock);
 }
 EXPORT_SYMBOL(tegra_dma_free_channel);
 
