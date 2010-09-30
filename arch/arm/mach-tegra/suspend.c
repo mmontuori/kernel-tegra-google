@@ -243,7 +243,7 @@ static noinline void suspend_cpu_complex(void)
 	}
 
 	gic_cpu_exit(0);
-	gic_dist_exit(0);
+	gic_dist_save(0);
 }
 
 unsigned int tegra_suspend_lp2(unsigned int us)
