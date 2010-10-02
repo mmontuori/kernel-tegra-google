@@ -337,8 +337,34 @@ ssize_t tegra_dc_compute_stride(int xres, int bpp, enum tegra_win_layout layout)
 		return ALIGN(raw_stride, TEGRA_DC_PITCH_ATOM);
 	else if (layout == TEGRA_WIN_LAYOUT_TILED)
 		return ALIGN(raw_stride, TEGRA_DC_TILED_ATOM);
-	else
+	else if (WARN_ON(layout != TEGRA_WIN_LAYOUT_LINEAR_TILED))
 		return -EINVAL;
+
+	/* tiled surfaces compatible with linear addressing must
+	 * satisfy (k * 2^n * TILED_ATOM), for n <= 6 and odd k <= 15. */
+	k = DIV_ROUND_UP(raw_stride, TEGRA_DC_TILED_ATOM);
+
+	while ((!(k & 1) || (k > 15)) && (n < 6)) {
+		k += (k & 1);
+		k >>= 1;
+		n++;
+	}
+
+	/* if n==6 and k is still even, find the smallest n which still
+	 * gives k < 15, since this will ensure that the least number of
+	 * padding bytes are added */
+	if (!(k & 1)) {
+		while (n && ((k << 1) < 15)) {
+			n--;
+			k <<= 1;
+		}
+		k++;
+	}
+
+	if (k > 15)
+		return -EINVAL;
+
+	return (k << n) * TEGRA_DC_TILED_ATOM;
 }
 EXPORT_SYMBOL(tegra_dc_compute_stride);
 
