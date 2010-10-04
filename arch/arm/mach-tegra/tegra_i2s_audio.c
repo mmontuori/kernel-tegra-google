@@ -65,7 +65,7 @@ struct audio_stream {
 	struct kfifo fifo;
 	struct completion fifo_completion;
 
-	unsigned errors;
+	struct tegra_audio_error_counts errors;
 
 	int i2s_fifo_atn_level;
 
@@ -558,7 +558,7 @@ static bool stop_playback_if_necessary(struct audio_stream *aos)
 	if (kfifo_is_empty(&aos->fifo)) {
 		sound_ops->stop_playback(aos);
 		if (aos->active)
-			aos->errors++;
+			aos->errors.full_empty++; /* underflow */
 		spin_unlock_irqrestore(&aos->dma_req_lock, flags);
 		pm_qos_update_request(aos->pm_qos, PM_QOS_DEFAULT_VALUE);
 		return true;
@@ -574,7 +574,7 @@ static bool stop_recording_if_necessary_nosync(struct audio_stream *ais)
 
 	if (ads->recording_cancelled || kfifo_is_full(&ais->fifo)) {
 		if (kfifo_is_full(&ais->fifo))
-			ais->errors++;
+			ais->errors.full_empty++;  /* overflow */
 		sound_ops->stop_recording(ais);
 		return true;
 	}
@@ -696,7 +696,7 @@ static void dma_tx_complete_callback(struct tegra_dma_req *req)
 	if (delta_us > max_delay_us) {
 		pr_debug("%s: too late by %lld us\n", __func__,
 			delta_us - max_delay_us);
-		aos->errors++;
+		aos->errors.late_dma++;
 	}
 
 	kfifo_skip(&aos->fifo, count);
@@ -1075,7 +1075,7 @@ static irqreturn_t i2s_interrupt(int irq, void *data)
 
 	if (status & I2S_I2S_FIFO_RX_ERR) {
 		ads->pio_stats.rx_fifo_errors++;
-		ads->in.errors++;
+		ads->in.errors.full_empty++;
 	}
 
 	if (status & I2S_FIFO_ERR)
@@ -1284,7 +1284,7 @@ static long tegra_audio_out_ioctl(struct file *file,
 				sizeof(aos->errors)))
 			rc = -EFAULT;
 		if (!rc)
-			aos->errors = 0;
+			aos->errors.late_dma = 0;
 		break;
 	case TEGRA_AUDIO_OUT_PRELOAD_FIFO: {
 		struct tegra_audio_out_preload preload;
@@ -1423,7 +1423,7 @@ static long tegra_audio_in_ioctl(struct file *file,
 				sizeof(ais->errors)))
 			rc = -EFAULT;
 		if (!rc)
-			ais->errors = 0;
+			ais->errors.late_dma = 0;
 		break;
 	default:
 		rc = -EINVAL;
@@ -1683,7 +1683,7 @@ static int tegra_audio_out_open(struct inode *inode, struct file *file)
 	mutex_lock(&ads->out.lock);
 	if (!ads->out.opened++) {
 		pr_info("%s: resetting fifo and error count\n", __func__);
-		ads->out.errors = 0;
+		memset(&ads->out.errors, 0, sizeof(ads->out.errors));
 		kfifo_reset(&ads->out.fifo);
 	}
 	mutex_unlock(&ads->out.lock);
@@ -1720,7 +1720,7 @@ static int tegra_audio_in_open(struct inode *inode, struct file *file)
 		 * input device.
 		 */
 		ads->recording_cancelled = false;
-		ads->in.errors = 0;
+		memset(&ads->in.errors, 0, sizeof(ads->in.errors));
 		kfifo_reset(&ads->in.fifo);
 	}
 	mutex_unlock(&ads->in.lock);
