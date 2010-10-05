@@ -26,10 +26,10 @@
 #include <linux/seq_file.h>
 #include <linux/regulator/consumer.h>
 #include <asm/clkdev.h>
+#include <mach/fuse.h>
 
 #include "clock.h"
 #include "board.h"
-#include "fuse.h"
 
 static LIST_HEAD(clocks);
 
