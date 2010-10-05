@@ -29,9 +29,9 @@
 
 #include <mach/iomap.h>
 #include <mach/suspend.h>
+#include <mach/fuse.h>
 
 #include "clock.h"
-#include "fuse.h"
 #include "tegra2_dvfs.h"
 
 #define RST_DEVICES			0x004
