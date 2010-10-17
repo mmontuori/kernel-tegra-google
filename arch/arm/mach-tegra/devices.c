@@ -821,3 +821,24 @@ struct platform_device tegra_avp_device = {
 		.coherent_dma_mask	= 0xffffffffULL,
 	},
 };
+
+static struct resource aes_resource[] = {
+[0] = {
+	.start  = TEGRA_VDE_BASE,
+	.end    = TEGRA_VDE_BASE + TEGRA_VDE_SIZE - 1,
+	.flags  = IORESOURCE_MEM,
+	},
+};
+
+static u64 aes_dma_mask = DMA_BIT_MASK(32);
+
+struct platform_device tegra_aes_device = {
+	.name = "tegra-aes",
+	.id = -1,
+	.resource = aes_resource,
+	.num_resources = ARRAY_SIZE(aes_resource),
+	.dev = {
+		.dma_mask = &aes_dma_mask,
+		.coherent_dma_mask = DMA_BIT_MASK(32),
+	},
+};
