@@ -73,15 +73,19 @@ unsigned int tegra_getspeed(unsigned int cpu)
 	return rate;
 }
 
+#ifdef CONFIG_SMP
 static void tegra_cpufreq_rescale_twd_other_cpu(void *data) {
 	unsigned long new_rate = *(unsigned long *)data;
 	twd_recalc_prescaler(new_rate);
 }
+#endif
 
 static void tegra_cpufreq_rescale_twds(unsigned long new_rate)
 {
+#ifdef CONFIG_SMP
 	twd_recalc_prescaler(new_rate);
 	smp_call_function(tegra_cpufreq_rescale_twd_other_cpu, &new_rate, 1);
+#endif
 }
 
 static int tegra_update_cpu_speed(unsigned long rate)
