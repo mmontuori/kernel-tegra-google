@@ -100,14 +100,14 @@ static void __init tegra_init_power(void)
 
 void __init tegra_common_init(void)
 {
+#ifdef CONFIG_TEGRA_SYSTEM_DMA
+	tegra_dma_init();
+#endif
 	tegra_init_fuse();
 	tegra_init_clock();
 	tegra_clk_init_from_table(common_clk_init_table);
 	tegra_init_power();
 	tegra_init_cache();
-#ifdef CONFIG_TEGRA_SYSTEM_DMA
-	tegra_dma_init();
-#endif
 }
 
 static int __init tegra_bootloader_fb_arg(char *options)
