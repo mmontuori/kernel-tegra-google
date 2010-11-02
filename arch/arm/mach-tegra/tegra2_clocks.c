@@ -127,6 +127,11 @@
 #define	SUPER_IDLE_SOURCE_SHIFT		0
 
 #define SUPER_CLK_DIVIDER		0x04
+#define SUPER_CLK_DIVIDEND_SHIFT	8
+#define SUPER_CLK_DIVIDEND_MASK		(0xFF << SUPER_CLK_DIVIDEND_SHIFT)
+#define SUPER_CLK_DIVISOR_SHIFT		0
+#define SUPER_CLK_DIVISOR_MASK		(0xFF << SUPER_CLK_DIVISOR_SHIFT)
+#define SUPER_CLK_DIVIDER_ENABLE	(1 << 31)
 
 #define BUS_CLK_DISABLE			(1<<3)
 #define BUS_CLK_DIV_MASK		0x3
@@ -293,6 +298,13 @@ static void tegra2_super_clk_init(struct clk *c)
 	c->state = ON;
 	BUG_ON(((val & SUPER_STATE_MASK) != SUPER_STATE_RUN) &&
 		((val & SUPER_STATE_MASK) != SUPER_STATE_IDLE));
+	BUG_ON(val & SUPER_CLK_DIVIDEND_MASK);
+
+	if (val & SUPER_CLK_DIVIDER_ENABLE) {
+		c->mul = 1;
+		c->div = (val >> SUPER_CLK_DIVISOR_SHIFT) & 0xFF;
+	}
+
 	shift = ((val & SUPER_STATE_MASK) == SUPER_STATE_IDLE) ?
 		SUPER_IDLE_SOURCE_SHIFT : SUPER_RUN_SOURCE_SHIFT;
 	source = (val >> shift) & SUPER_SOURCE_MASK;
@@ -308,7 +320,6 @@ static void tegra2_super_clk_init(struct clk *c)
 
 static int tegra2_super_clk_enable(struct clk *c)
 {
-	clk_writel(0, c->reg + SUPER_CLK_DIVIDER);
 	return 0;
 }
 
@@ -351,11 +362,31 @@ static int tegra2_super_clk_set_parent(struct clk *c, struct clk *p)
 	return -EINVAL;
 }
 
+static int tegra2_super_clk_set_rate(struct clk *c, unsigned long rate)
+{
+	u32 val;
+
+	int div = DIV_ROUND_UP(clk_get_rate(c->parent), rate);
+	div = clamp(div, 1, 256);
+
+	val = clk_readl(c->reg + SUPER_CLK_DIVIDER);
+	val &= ~SUPER_CLK_DIVIDEND_MASK;
+	val |= (div - 1) << SUPER_CLK_DIVISOR_SHIFT;
+	val |= SUPER_CLK_DIVIDER_ENABLE;
+	clk_writel(val, c->reg + SUPER_CLK_DIVIDER);
+
+	c->div = div;
+	c->mul = 1;
+
+	return 0;
+}
+
 static struct clk_ops tegra_super_ops = {
 	.init			= tegra2_super_clk_init,
 	.enable			= tegra2_super_clk_enable,
 	.disable		= tegra2_super_clk_disable,
 	.set_parent		= tegra2_super_clk_set_parent,
+	.set_rate		= tegra2_super_clk_set_rate,
 };
 
 /* virtual cpu clock functions */
