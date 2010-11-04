@@ -44,6 +44,7 @@
 #include <linux/delay.h>
 #include <linux/tegra_audio.h>
 #include <linux/pm.h>
+#include <linux/workqueue.h>
 #include <mach/dma.h>
 #include <mach/iomap.h>
 #include <mach/i2s.h>
@@ -90,6 +91,7 @@ struct audio_stream {
 	struct tegra_dma_req dma_req;
 
 	struct pm_qos_request_list pm_qos;
+	struct execute_work ew;
 };
 
 struct i2s_pio_stats {
@@ -221,8 +223,10 @@ static inline void prevent_suspend(struct audio_stream *as)
 	pm_qos_update_request(&as->pm_qos, 0);
 }
 
-static inline void allow_suspend(struct audio_stream *as)
+static inline void allow_suspend(struct work_struct *ws)
 {
+	struct execute_work *ew = container_of(ws, struct execute_work, work);
+	struct audio_stream *as = container_of(ew, struct audio_stream, ew);
 	pr_debug("%s\n", __func__);
 	pm_qos_update_request(&as->pm_qos, PM_QOS_DEFAULT_VALUE);
 }
@@ -699,7 +703,7 @@ static bool stop_playback_if_necessary(struct audio_stream *aos)
 	if (kfifo_is_empty(&aos->fifo)) {
 		sound_ops->stop_playback(aos);
 		spin_unlock_irqrestore(&aos->dma_req_lock, flags);
-		allow_suspend(aos);
+		execute_in_process_context(allow_suspend, &aos->ew);
 		return true;
 	}
 	spin_unlock_irqrestore(&aos->dma_req_lock, flags);
@@ -728,7 +732,7 @@ static bool wait_till_stopped(struct audio_stream *as)
 			&as->stop_completion, HZ);
 	if (!rc)
 		pr_err("%s: wait timed out", __func__);
-	allow_suspend(as);
+	execute_in_process_context(allow_suspend, &as->ew);
 	pr_debug("%s: done: %d\n", __func__, rc);
 	return true;
 }
@@ -1978,7 +1982,7 @@ static int tegra_audio_out_release(struct inode *inode, struct file *file)
 		if (kfifo_len(&ads->out.fifo))
 			pr_err("%s: output fifo is not empty (%d bytes left)\n",
 				__func__, kfifo_len(&ads->out.fifo));
-		allow_suspend(&ads->out);
+		execute_in_process_context(allow_suspend, &ads->out.ew);
 	}
 	mutex_unlock(&ads->out.lock);
 
@@ -2023,7 +2027,7 @@ static int tegra_audio_in_release(struct inode *inode, struct file *file)
 		if (kfifo_len(&ads->in.fifo))
 			pr_err("%s: input fifo is not empty (%d bytes left)\n",
 				__func__, kfifo_len(&ads->in.fifo));
-		allow_suspend(&ads->in);
+		execute_in_process_context(allow_suspend, &ads->in.ew);
 	}
 
 	mutex_unlock(&ads->in.lock);
