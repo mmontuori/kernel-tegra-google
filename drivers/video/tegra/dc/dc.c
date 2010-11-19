@@ -94,7 +94,7 @@ static inline int tegra_dc_fmt_bpp(int fmt)
 	return 0;
 }
 
-static inline int tegra_dc_is_yuv_planar(int fmt)
+static inline bool tegra_dc_is_yuv_planar(int fmt)
 {
 	switch (fmt) {
 	case TEGRA_WIN_FMT_YUV420P:
