@@ -94,7 +94,7 @@ static inline int tegra_dc_fmt_bpp(int fmt)
 	return 0;
 }
 
-static inline int tegra_dc_is_yuv_planar(int fmt)
+static inline bool tegra_dc_is_yuv_planar(int fmt)
 {
 	switch (fmt) {
 	case TEGRA_WIN_FMT_YUV420P:
@@ -496,7 +496,7 @@ int tegra_dc_update_windows(struct tegra_dc_win *windows[], int n)
 		struct tegra_dc_win *win = windows[i];
 		unsigned h_dda;
 		unsigned v_dda;
-		int yuvp = tegra_dc_is_yuv_planar(win->fmt);
+		bool yuvp = tegra_dc_is_yuv_planar(win->fmt);
 
 		if (win->z != dc->blend.z[win->idx]) {
 			dc->blend.z[win->idx] = win->z;
