@@ -107,7 +107,7 @@ static int tegra_ehci_hub_control(
 	if (typeReq == GetPortStatus) {
 		spin_lock_irqsave(&ehci->lock, flags);
 		temp = ehci_readl(ehci, status_reg);
-		if (tegra->port_resuming &&  !(temp & PORT_SUSPEND)) {
+		if (tegra->port_resuming && !(temp & PORT_SUSPEND)) {
 			/* resume completed */
 			tegra->port_resuming = 0;
 			tegra_usb_phy_postresume(tegra->phy);
@@ -118,8 +118,10 @@ static int tegra_ehci_hub_control(
 	if (typeReq == SetPortFeature && wValue == USB_PORT_FEAT_SUSPEND) {
 		spin_lock_irqsave(&ehci->lock, flags);
 		temp = ehci_readl(ehci, status_reg);
-		if ((temp & PORT_PE) == 0 || (temp & PORT_RESET) != 0)
-			retval = -EPIPE;
+		if ((temp & PORT_PE) == 0 || (temp & PORT_RESET) != 0) {
+			spin_unlock_irqrestore(&ehci->lock, flags);
+			return -EPIPE;
+		}
 
 		/* After above check the port must be connected.
 		 * Set appropriate bit thus could put phy into low power
@@ -145,8 +147,10 @@ static int tegra_ehci_hub_control(
 	if (typeReq == ClearPortFeature && wValue == USB_PORT_FEAT_SUSPEND) {
 		spin_lock_irqsave(&ehci->lock, flags);
 		temp = ehci_readl(ehci, status_reg);
-		if ((temp & PORT_RESET) || !(temp & PORT_PE))
+		if ((temp & PORT_RESET) || !(temp & PORT_PE)) {
+			spin_unlock_irqrestore(&ehci->lock, flags);
 			retval = -EPIPE;
+		}
 
 		if (!(temp & PORT_SUSPEND)) {
 			spin_unlock_irqrestore(&ehci->lock, flags);
@@ -165,8 +169,12 @@ static int tegra_ehci_hub_control(
 		/* start resume signalling */
 		ehci_writel(ehci, temp | PORT_RESUME, status_reg);
 
+		spin_unlock_irqrestore(&ehci->lock, flags);
+		msleep(20);
+		spin_lock_irqsave(&ehci->lock, flags);
+
 		/* polling PORT_RESUME until the controller clear this bit */
-		if (handshake(ehci, status_reg, PORT_RESUME, 0, 20000))
+		if (handshake(ehci, status_reg, PORT_RESUME, 0, 2000))
 			pr_err("%s: timeout waiting for PORT_RESUME\n", __func__);
 
 		/* write PORT_RESUME to 0 to clear PORT_SUSPEND bit */
