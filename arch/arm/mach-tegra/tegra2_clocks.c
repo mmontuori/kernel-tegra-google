@@ -1841,6 +1841,18 @@ static struct clk_mux_sel mux_clk_32k[] = {
 	{ 0, 0},
 };
 
+static struct clk tegra_clk_emc = {
+	.name = "emc",
+	.ops = &tegra_periph_clk_ops,
+	.reg = 0x19c,
+	.max_rate = 800000000,
+	.inputs = mux_pllm_pllc_pllp_clkm,
+	.flags = MUX | DIV_U71 | PERIPH_EMC_ENB,
+	.u.periph = {
+		.clk_num = 57,
+	},
+};
+
 #define PERIPH_CLK(_name, _dev, _con, _clk_num, _reg, _max, _inputs, _flags) \
 	{						\
 		.name      = _name,			\
@@ -1929,13 +1941,17 @@ struct clk tegra_list_clks[] = {
 	PERIPH_CLK("usbd",	"fsl-tegra-udc",	NULL,	22,	0,	480000000, mux_clk_m,			0), /* requires min voltage */
 	PERIPH_CLK("usb2",	"tegra-ehci.1",		NULL,	58,	0,	480000000, mux_clk_m,			0), /* requires min voltage */
 	PERIPH_CLK("usb3",	"tegra-ehci.2",		NULL,	59,	0,	480000000, mux_clk_m,			0), /* requires min voltage */
-	PERIPH_CLK("emc",	"emc",			NULL,	57,	0x19c,	800000000, mux_pllm_pllc_pllp_clkm,	MUX | DIV_U71 | PERIPH_EMC_ENB),
 	PERIPH_CLK("dsi",	"dsi",			NULL,	48,	0,	500000000, mux_plld,			0), /* scales with voltage */
 	PERIPH_CLK("csi",	"tegra_camera",		"csi",	52,	0,	72000000,  mux_pllp_out3,		0),
 	PERIPH_CLK("isp",	"tegra_camera",		"isp",	23,	0,	150000000, mux_clk_m,			0), /* same frequency as VI */
 	PERIPH_CLK("csus",	"tegra_camera",		"csus",	92,	0,	150000000, mux_clk_m,			PERIPH_NO_RESET),
 
 	SHARED_CLK("avp.sclk",	"tegra-avp",		"sclk",	&tegra_clk_sclk),
+	SHARED_CLK("avp.emc",	"tegra-avp",		"emc",	&tegra_clk_emc),
+	SHARED_CLK("cpu.emc",	"cpu",			"emc",	&tegra_clk_emc),
+	SHARED_CLK("disp1.emc",	"tegradc.0",		"emc",	&tegra_clk_emc),
+	SHARED_CLK("disp2.emc",	"tegradc.1",		"emc",	&tegra_clk_emc),
+	SHARED_CLK("hdmi.emc",	"hdmi",			"emc",	&tegra_clk_emc),
 };
 
 #define CLK_DUPLICATE(_name, _dev, _con)		\
@@ -2010,6 +2026,7 @@ struct clk *tegra_ptr_clks[] = {
 	&tegra_clk_virtual_cpu,
 	&tegra_clk_blink,
 	&tegra_clk_cop,
+	&tegra_clk_emc,
 };
 
 static void tegra2_init_one_clock(struct clk *c)
