@@ -28,7 +28,7 @@
 #include <mach/powergate.h>
 #include <mach/clk.h>
 
-#define ACM_TIMEOUT 1*HZ
+#define ACM_TIMEOUT_JIFFIES 1
 
 void nvhost_module_busy(struct nvhost_module *mod)
 {
@@ -83,7 +83,7 @@ void nvhost_module_idle_mult(struct nvhost_module *mod, int refs)
 	mutex_lock(&mod->lock);
 	if (atomic_sub_return(refs, &mod->refcount) == 0) {
 		BUG_ON(!mod->powered);
-		schedule_delayed_work(&mod->powerdown, ACM_TIMEOUT);
+		schedule_delayed_work(&mod->powerdown, ACM_TIMEOUT_JIFFIES);
 		kick = true;
 	}
 	mutex_unlock(&mod->lock);
