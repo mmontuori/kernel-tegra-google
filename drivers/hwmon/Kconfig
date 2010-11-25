@@ -691,6 +691,17 @@ config SENSORS_MAX6650
 	  This driver can also be built as a module.  If so, the module
 	  will be called max6650.
 
+config SENSORS_NCT1008x
+       tristate "OnSemi NCT1008x Temperature Monitor chip"
+       depends on I2C
+       help
+         If you say yes here you get access to the temperature monitoring
+         functions of the OnSemi NCT1008x temperature monitor chip.
+         NCT1008x can be used to measure the ambient temperature and
+	 throttle the cpu accordingly.
+         This driver can also be built as a module.  If so, the module
+         will be called nct1008.
+
 config SENSORS_PC87360
 	tristate "National Semiconductor PC87360 family"
 	select HWMON_VID
