@@ -35,6 +35,7 @@
 
 #include "board.h"
 #include "clock.h"
+#include "emc.h"
 #include "fuse.h"
 
 #define MC_SECURITY_CFG2 0x7c
@@ -136,6 +137,7 @@ void __init tegra_common_init(void)
 	arm_pm_restart = tegra_pm_restart;
 	tegra_init_fuse();
 	tegra_init_clock();
+	tegra_init_emc();
 	tegra_clk_init_from_table(common_clk_init_table);
 	tegra_init_power();
 	tegra_init_cache();
