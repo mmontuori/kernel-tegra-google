@@ -1033,10 +1033,6 @@ static long tegra2_emc_clk_round_rate(struct clk *c, unsigned long rate)
 {
 	long new_rate = rate;
 
-	new_rate = tegra2_periph_clk_round_rate(c, new_rate);
-	if (new_rate < 0)
-		return c->max_rate;
-
 	new_rate = tegra_emc_round_rate(new_rate);
 	if (new_rate < 0)
 		return c->max_rate;
