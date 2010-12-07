@@ -20,36 +20,36 @@ endchoice
 comment "Tegra board type"
 
 config MACH_HARMONY
-       bool "Harmony board"
-       help
-         Support for NVIDIA Harmony development platform
+	bool "Harmony board"
+	help
+	  Support for NVIDIA Harmony development platform
 
 config MACH_VENTANA
-       bool "Ventana board"
-       help
-         Support for NVIDIA Ventana development platform
+	bool "Ventana board"
+	help
+	  Support for NVIDIA Ventana development platform
 
 choice
-        prompt "Low-level debug console UART"
-        default TEGRA_DEBUG_UART_NONE
+	prompt "Low-level debug console UART"
+	default TEGRA_DEBUG_UART_NONE
 
 config TEGRA_DEBUG_UART_NONE
-        bool "None"
+	bool "None"
 
 config TEGRA_DEBUG_UARTA
-        bool "UART-A"
+	bool "UART-A"
 
 config TEGRA_DEBUG_UARTB
-        bool "UART-B"
+	bool "UART-B"
 
 config TEGRA_DEBUG_UARTC
-        bool "UART-C"
+	bool "UART-C"
 
 config TEGRA_DEBUG_UARTD
-        bool "UART-D"
+	bool "UART-D"
 
 config TEGRA_DEBUG_UARTE
-        bool "UART-E"
+	bool "UART-E"
 
 endchoice
 
@@ -89,3 +89,11 @@ config TEGRA_IOVMM_GART
 
 config TEGRA_IOVMM
 	bool
+
+config TEGRA_MC_PROFILE
+	tristate "Enable profiling memory controller utilization"
+	default n
+	help
+	  When enabled, provides a mechanism to perform statistical
+	  sampling of the memory controller usage on a client-by-client
+	  basis, and report the log through sysfs.
