@@ -350,6 +350,7 @@ int clk_set_rate(struct clk *c, unsigned long rate)
 	int ret = 0;
 	unsigned long flags;
 	unsigned long old_rate;
+	long new_rate;
 
 	clk_lock_save(c, flags);
 
@@ -359,22 +360,31 @@ int clk_set_rate(struct clk *c, unsigned long rate)
 	}
 
 	old_rate = clk_get_rate_locked(c);
+	new_rate = rate;
 
-	if (rate > c->max_rate)
-		rate = c->max_rate;
+	if (new_rate > c->max_rate)
+		new_rate = c->max_rate;
 
-	if (clk_is_auto_dvfs(c) && rate > old_rate && c->refcnt > 0) {
-		ret = tegra_dvfs_set_rate(c, rate);
+	if (c->ops && c->ops->round_rate)
+		new_rate = c->ops->round_rate(c, new_rate);
+
+	if (new_rate < 0) {
+		ret = new_rate;
+		goto out;
+	}
+
+	if (clk_is_auto_dvfs(c) && new_rate > old_rate && c->refcnt > 0) {
+		ret = tegra_dvfs_set_rate(c, new_rate);
 		if (ret)
 			goto out;
 	}
 
-	ret = c->ops->set_rate(c, rate);
+	ret = c->ops->set_rate(c, new_rate);
 	if (ret)
 		goto out;
 
-	if (clk_is_auto_dvfs(c) && rate < old_rate && c->refcnt > 0)
-		ret = tegra_dvfs_set_rate(c, rate);
+	if (clk_is_auto_dvfs(c) && new_rate < old_rate && c->refcnt > 0)
+		ret = tegra_dvfs_set_rate(c, new_rate);
 
 out:
 	clk_unlock_restore(c, flags);
