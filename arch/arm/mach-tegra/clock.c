@@ -363,6 +363,9 @@ int clk_set_rate(struct clk *c, unsigned long rate)
 	if (rate > c->max_rate)
 		rate = c->max_rate;
 
+	if (c->ops && c->ops->round_rate)
+		rate = c->ops->round_rate(c, rate);
+
 	if (clk_is_auto_dvfs(c) && rate > old_rate && c->refcnt > 0) {
 		ret = tegra_dvfs_set_rate(c, rate);
 		if (ret)
