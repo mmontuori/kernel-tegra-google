@@ -511,6 +511,13 @@ static int tegra_aes_handle_req(struct tegra_aes_dev *dd)
 		ctx->flags |= FLAGS_NEW_KEY;
 	}
 
+	total = dd->total;
+	in_sg = dd->in_sg;
+	out_sg = dd->out_sg;
+
+	if (!in_sg || !out_sg)
+		return -EINVAL;
+
 	/* take mutex to access the aes hw */
 	mutex_lock(&aes_lock);
 
@@ -520,10 +527,6 @@ static int tegra_aes_handle_req(struct tegra_aes_dev *dd)
 		mutex_unlock(&aes_lock);
 		return -EBUSY;
 	}
-
-	total = dd->total;
-	in_sg = dd->in_sg;
-	out_sg = dd->out_sg;
 
 	aes_set_key(dd);
 
@@ -594,6 +597,9 @@ out:
 		aes_release_key_slot(dd);
 	}
 
+	if (dd->req->base.complete)
+		dd->req->base.complete(&dd->req->base, err);
+
 	dev_dbg(dd->dev, "exit\n");
 	return ret;
 }
@@ -616,12 +622,7 @@ static int tegra_aes_crypt(struct ablkcipher_request *req, unsigned long mode)
 	spin_unlock_irqrestore(&dd->lock, flags);
 
 	if (!test_and_set_bit(FLAGS_BUSY, &dd->flags))
-		err = tegra_aes_handle_req(dd);
-	else
-		err = -EBUSY;
-
-	if (dd->req->base.complete)
-		dd->req->base.complete(&dd->req->base, err);
+		tegra_aes_handle_req(dd);
 
 	return err;
 }
