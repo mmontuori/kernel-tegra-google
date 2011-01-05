@@ -331,6 +331,7 @@ static int tegra_usb_resume(struct usb_hcd *hcd)
 	return 0;
 
 restart:
+	msleep(1);
 	tegra_ehci_restart(hcd);
 	return 0;
 }
