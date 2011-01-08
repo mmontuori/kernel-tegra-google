@@ -201,13 +201,13 @@ static const struct tegra_hdmi_audio_config
 }
 
 
-static inline unsigned long tegra_hdmi_readl(struct tegra_dc_hdmi_data *hdmi,
+unsigned long tegra_hdmi_readl(struct tegra_dc_hdmi_data *hdmi,
 					     unsigned long reg)
 {
 	return readl(hdmi->base + reg * 4);
 }
 
-static inline void tegra_hdmi_writel(struct tegra_dc_hdmi_data *hdmi,
+void tegra_hdmi_writel(struct tegra_dc_hdmi_data *hdmi,
 				     unsigned long val, unsigned long reg)
 {
 	writel(val, hdmi->base + reg * 4);
@@ -883,6 +883,8 @@ static void tegra_dc_hdmi_enable(struct tegra_dc *dc)
 	clk_set_rate(hdmi->clk, dc->mode.pclk);
 
 	clk_enable(hdmi->clk);
+	tegra_periph_reset_deassert(hdmi->clk);
+	mdelay(1);
 	tegra_periph_reset_assert(hdmi->clk);
 	mdelay(1);
 	tegra_periph_reset_deassert(hdmi->clk);

@@ -119,6 +119,7 @@ static void _dump_regs(struct tegra_dc *dc, void *data,
 	char buff[256];
 
 	tegra_dc_io_start(dc);
+	clk_enable(dc->clk);
 
 	DUMP_REG(DC_CMD_DISPLAY_COMMAND_OPTION0);
 	DUMP_REG(DC_CMD_DISPLAY_COMMAND);
@@ -256,6 +257,7 @@ static void _dump_regs(struct tegra_dc *dc, void *data,
 		DUMP_REG(DC_WIN_CSC_KVB);
 	}
 
+	clk_disable(dc->clk);
 	tegra_dc_io_end(dc);
 }
 
@@ -1224,7 +1226,7 @@ static int tegra_dc_suspend(struct nvhost_device *ndev, pm_message_t state)
 {
 	struct tegra_dc *dc = nvhost_get_drvdata(ndev);
 
-	dev_info(&ndev->dev, "suspend\n");
+	dev_info(&ndev->dev, "suspend %d %d\n", dc->syncpt_min, dc->syncpt_max);
 
 	mutex_lock(&dc->lock);
 
