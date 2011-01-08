@@ -89,6 +89,10 @@ struct audio_stream {
 	spinlock_t dma_req_lock;
 
 	struct work_struct allow_suspend_work;
+
+	int dropped_bufs;
+	bool xrun;	/* indicates output underrun or input overrun */
+	struct work_struct restart_dma_work;
 };
 
 /* per i2s controller */
@@ -633,18 +637,17 @@ static const struct sound_ops *sound_ops = &dma_sound_ops;
 static int start_recording_if_necessary(struct audio_stream *ais, int size)
 {
 	int rc = 0;
-	bool started = false;
 	unsigned long flags;
-	prevent_suspend(ais);
 	spin_lock_irqsave(&ais->dma_req_lock, flags);
 	if (!ais->stop && !pending_buffer_requests(ais)) {
 		/* pr_debug("%s: starting recording\n", __func__); */
 		rc = sound_ops->start_recording(ais, size);
-		started = !rc;
+		if (rc) {
+			pr_err("%s start_recording() failed\n", __func__);
+			allow_suspend(ais);
+		}
 	}
 	spin_unlock_irqrestore(&ais->dma_req_lock, flags);
-	if (!started)
-		allow_suspend(ais);
 	return rc;
 }
 
@@ -690,11 +693,12 @@ static void request_stop_nosync(struct audio_stream *as)
 	pr_debug("%s\n", __func__);
 	if (!as->stop) {
 		as->stop = true;
-		if (pending_buffer_requests(as))
+		if (!tegra_dma_is_empty(as->dma_chan))
 			wait_till_stopped(as);
 		for (i = 0; i < as->num_bufs; i++) {
 			init_completion(&as->comp[i]);
 			complete(&as->comp[i]);
+			as->dma_req[i].size = 0;
 		}
 	}
 	if (!tegra_dma_is_empty(as->dma_chan))
@@ -816,8 +820,11 @@ static void tear_down_dma(struct audio_driver_state *ads)
 
 static void dma_tx_complete_callback(struct tegra_dma_req *req)
 {
+	unsigned long flags;
 	struct audio_stream *aos = req->dev;
 	unsigned req_num;
+
+	spin_lock_irqsave(&aos->dma_req_lock, flags);
 
 	req_num = req - aos->dma_req;
 	pr_debug("%s: completed buffer %d size %d\n", __func__,
@@ -826,10 +833,23 @@ static void dma_tx_complete_callback(struct tegra_dma_req *req)
 
 	complete(&aos->comp[req_num]);
 
-	if (!pending_buffer_requests(aos)) {
-		pr_debug("%s: Playback underflow\n", __func__);
-		complete(&aos->stop_completion);
+	if (aos->stop) {
+		if (!pending_buffer_requests(aos))
+			complete(&aos->stop_completion);
+	} else {
+		if (tegra_dma_is_empty(aos->dma_chan)) {
+			if (!work_pending(&aos->restart_dma_work))
+				schedule_work(&aos->restart_dma_work);
+			aos->xrun = true;
+		}
+		if (aos->xrun) {
+			aos->dropped_bufs++;
+			pr_debug("%s: Playback underflow dropped %d buffers\n",
+				 __func__, aos->dropped_bufs);
+		}
 	}
+
+	spin_unlock_irqrestore(&aos->dma_req_lock, flags);
 }
 
 static void dma_rx_complete_callback(struct tegra_dma_req *req)
@@ -847,8 +867,18 @@ static void dma_rx_complete_callback(struct tegra_dma_req *req)
 
 	complete(&ais->comp[req_num]);
 
-	if (!pending_buffer_requests(ais))
-		pr_debug("%s: Capture overflow\n", __func__);
+	if (!ais->stop) {
+		if (tegra_dma_is_empty(ais->dma_chan)) {
+			if (!work_pending(&ais->restart_dma_work))
+				schedule_work(&ais->restart_dma_work);
+			ais->xrun = true;
+		}
+		if (ais->xrun) {
+			ais->dropped_bufs++;
+			pr_debug("%s: Capture overflow dropped %d buffers\n",
+				 __func__, ais->dropped_bufs);
+		}
+	}
 
 	spin_unlock_irqrestore(&ais->dma_req_lock, flags);
 }
@@ -958,7 +988,6 @@ static int start_dma_recording(struct audio_stream *ais, int size)
 	}
 
 	ais->last_queued = ais->num_bufs - 1;
-
 #if 0
 	i2s_fifo_clear(ads->i2s_base, I2S_FIFO_RX);
 #endif
@@ -984,6 +1013,85 @@ static void stop_dma_recording(struct audio_stream *ais)
 	}
 	if (spin == 100)
 		pr_warn("%s: spinny\n", __func__);
+}
+
+static void restart_capture_worker(struct work_struct *w)
+{
+	struct audio_stream *ais = container_of(w,
+			struct audio_stream, restart_dma_work);
+	int rc;
+	unsigned long flags;
+
+	mutex_lock(&ais->lock);
+
+	spin_lock_irqsave(&ais->dma_req_lock, flags);
+	if (ais->stop || !ais->xrun) {
+		pr_debug("%s: recording has been cancelled\n", __func__);
+		spin_unlock_irqrestore(&ais->dma_req_lock, flags);
+		goto done;
+	}
+	spin_unlock_irqrestore(&ais->dma_req_lock, flags);
+	pr_debug("%s last queued %d\n", __func__, ais->last_queued);
+
+	rc = start_recording_if_necessary(ais, ais->dma_req[0].size);
+	if (rc < 0 && rc != -EALREADY) {
+		pr_err("%s: could not start recording\n", __func__);
+		goto done;
+	}
+
+done:
+	mutex_unlock(&ais->lock);
+}
+
+static void restart_playback_worker(struct work_struct *w)
+{
+	struct audio_stream *aos = container_of(w,
+			struct audio_stream, restart_dma_work);
+	ssize_t rc;
+	int out_buf;
+	struct tegra_dma_req *req;
+	unsigned long flags;
+
+	mutex_lock(&aos->lock);
+
+	spin_lock_irqsave(&aos->dma_req_lock, flags);
+	if (aos->stop || !aos->xrun) {
+		pr_debug("%s: playback restart cancelled\n", __func__);
+		spin_unlock_irqrestore(&aos->dma_req_lock, flags);
+		goto done;
+	}
+	spin_unlock_irqrestore(&aos->dma_req_lock, flags);
+
+	pr_debug("%s last queued %d\n", __func__, aos->last_queued);
+
+	out_buf = (aos->last_queued + 1) % aos->num_bufs;
+	rc = wait_for_completion_interruptible_timeout(
+					&aos->comp[out_buf], HZ);
+	if (!rc) {
+		pr_err("%s: timeout", __func__);
+		goto done;
+	} else if (rc < 0) {
+		pr_err("%s: wait error %d", __func__, rc);
+		goto done;
+	}
+
+	req = &aos->dma_req[out_buf];
+
+	/* req->size == 0 means this buffer has never been used, i.e. */
+	/* we got an underrun on first buffer */
+	if (req->size == 0)
+		goto done;
+
+	memset(aos->buffer[out_buf], 0, req->size);
+
+	aos->last_queued = out_buf;
+
+	rc = start_playback(aos, req);
+	if (rc)
+		allow_suspend(aos);
+
+done:
+	mutex_unlock(&aos->lock);
 }
 
 static irqreturn_t i2s_interrupt(int irq, void *data)
@@ -1061,8 +1169,10 @@ static ssize_t tegra_audio_write(struct file *file,
 	init_completion(&ads->out.stop_completion);
 
 	rc = start_playback(&ads->out, req);
-	if (!rc)
+	if (!rc) {
 		rc = size;
+		ads->out.xrun = false;
+	}
 	else
 		allow_suspend(&ads->out);
 
@@ -1090,6 +1200,8 @@ static long tegra_audio_out_ioctl(struct file *file,
 		if (stop_playback_if_necessary(aos))
 			pr_debug("%s: done (stopped)\n", __func__);
 		aos->stop = false;
+		aos->dropped_bufs = 0;
+		aos->xrun = false;
 		break;
 	case TEGRA_AUDIO_OUT_SET_NUM_BUFS: {
 		unsigned int num;
@@ -1119,6 +1231,15 @@ static long tegra_audio_out_ioctl(struct file *file,
 		if (copy_to_user((void __user *)arg,
 				&aos->num_bufs, sizeof(aos->num_bufs)))
 			rc = -EFAULT;
+		break;
+	case TEGRA_AUDIO_OUT_GET_DROPPED_BUFS:
+		if (copy_to_user((void __user *)arg,
+				&aos->dropped_bufs, sizeof(aos->dropped_bufs)))
+			rc = -EFAULT;
+		if (aos->dropped_bufs)
+			pr_debug("%s: Get dropped bufs: %d\n",
+				 __func__, aos->dropped_bufs);
+		aos->dropped_bufs = 0;
 		break;
 	default:
 		rc = -EINVAL;
@@ -1211,6 +1332,8 @@ static long tegra_audio_in_ioctl(struct file *file,
 			/* Set stop flag and allow suspend. */
 			request_stop_nosync(ais);
 		}
+		ais->dropped_bufs = 0;
+		ais->xrun = false;
 		break;
 	case TEGRA_AUDIO_IN_SET_CONFIG: {
 		struct tegra_audio_in_config cfg;
@@ -1275,6 +1398,15 @@ static long tegra_audio_in_ioctl(struct file *file,
 				&ais->num_bufs, sizeof(ais->num_bufs)))
 			rc = -EFAULT;
 		break;
+	case TEGRA_AUDIO_IN_GET_DROPPED_BUFS:
+		if (copy_to_user((void __user *)arg,
+				&ais->dropped_bufs, sizeof(ais->dropped_bufs)))
+			rc = -EFAULT;
+		if (ais->dropped_bufs)
+			pr_debug("%s: Get dropped bufs: %d\n",
+				 __func__, ais->dropped_bufs);
+		ais->dropped_bufs = 0;
+		break;
 	default:
 		rc = -EINVAL;
 	}
@@ -1311,7 +1443,7 @@ static ssize_t tegra_audio_read(struct file *file, char __user *buf,
 		goto done;
 	}
 
-	/* This function calls prevent_suspend() internally */
+	prevent_suspend(&ads->in);
 	rc = start_recording_if_necessary(&ads->in, size);
 	if (rc < 0 && rc != -EALREADY) {
 		pr_err("%s: could not start recording\n", __func__);
@@ -1363,6 +1495,8 @@ static ssize_t tegra_audio_read(struct file *file, char __user *buf,
 
 	rc = nr;
 	*off += nr;
+
+	ads->in.xrun = false;
 done:
 	mutex_unlock(&ads->in.lock);
 	pr_debug("%s: done %d\n", __func__, rc);
@@ -1386,11 +1520,14 @@ static int tegra_audio_out_open(struct inode *inode, struct file *file)
 
 	ads->out.opened = 1;
 	ads->out.stop = false;
+	ads->out.dropped_bufs = 0;
+	ads->out.xrun = false;
 
 	for (i = 0; i < I2S_MAX_NUM_BUFS; i++) {
 		init_completion(&ads->out.comp[i]);
 		/* TX buf rest state is unqueued, complete. */
 		complete(&ads->out.comp[i]);
+		ads->out.dma_req[i].size = 0;
 	}
 
 done:
@@ -1431,6 +1568,8 @@ static int tegra_audio_in_open(struct inode *inode, struct file *file)
 
 	ads->in.opened = 1;
 	ads->in.stop = false;
+	ads->in.dropped_bufs = 0;
+	ads->in.xrun = false;
 
 	for (i = 0; i < I2S_MAX_NUM_BUFS; i++) {
 		init_completion(&ads->in.comp[i]);
@@ -1811,6 +1950,8 @@ static int tegra_audio_probe(struct platform_device *pdev)
 			return rc;
 
 		INIT_WORK(&state->out.allow_suspend_work, allow_suspend_worker);
+		INIT_WORK(&state->out.restart_dma_work,
+				restart_playback_worker);
 
 		rc = setup_misc_device(&state->misc_out,
 			&tegra_audio_out_fops,
@@ -1847,6 +1988,7 @@ static int tegra_audio_probe(struct platform_device *pdev)
 			return rc;
 
 		INIT_WORK(&state->in.allow_suspend_work, allow_suspend_worker);
+		INIT_WORK(&state->in.restart_dma_work, restart_capture_worker);
 
 		rc = setup_misc_device(&state->misc_in,
 			&tegra_audio_in_fops,
