@@ -320,7 +320,6 @@ static int aes_start_crypt(struct tegra_aes_dev *dd, u32 in_addr, u32 out_addr,
 		aes_writel(dd, cmdq[i], ICMDQUE_WR);
 	}
 
-	INIT_COMPLETION(dd->op_complete);
 	ret = wait_for_completion_timeout(&dd->op_complete, msecs_to_jiffies(150));
 	if (ret == 0) {
 		dev_err(dd->dev, "timed out (0x%x)\n",
@@ -328,6 +327,8 @@ static int aes_start_crypt(struct tegra_aes_dev *dd, u32 in_addr, u32 out_addr,
 		clk_disable(dd->iclk);
 		clk_disable(dd->pclk);
 		return -ETIMEDOUT;
+	} else {
+		INIT_COMPLETION(dd->op_complete);
 	}
 
 	aes_writel(dd, cmdq[qlen - 1], ICMDQUE_WR);
