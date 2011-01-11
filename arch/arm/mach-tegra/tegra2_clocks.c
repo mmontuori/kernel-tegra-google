@@ -2134,7 +2134,7 @@ void __init tegra2_init_clocks(void)
 
 #ifdef CONFIG_PM
 static u32 clk_rst_suspend[RST_DEVICES_NUM + CLK_OUT_ENB_NUM +
-			   PERIPH_CLK_SOURCE_NUM + 15];
+			   PERIPH_CLK_SOURCE_NUM + 16];
 
 void tegra_clk_suspend(void)
 {
@@ -2146,6 +2146,8 @@ void tegra_clk_suspend(void)
 	*ctx++ = clk_readl(tegra_pll_c.reg + PLL_MISC(&tegra_pll_c));
 	*ctx++ = clk_readl(tegra_pll_a.reg + PLL_BASE);
 	*ctx++ = clk_readl(tegra_pll_a.reg + PLL_MISC(&tegra_pll_a));
+	*ctx++ = clk_readl(tegra_pll_d.reg + PLL_BASE);
+	*ctx++ = clk_readl(tegra_pll_d.reg + PLL_MISC(&tegra_pll_d));
 
 	*ctx++ = clk_readl(tegra_pll_m_out1.reg);
 	*ctx++ = clk_readl(tegra_pll_a_out0.reg);
@@ -2191,6 +2193,8 @@ void tegra_clk_resume(void)
 	clk_writel(*ctx++, tegra_pll_c.reg + PLL_MISC(&tegra_pll_c));
 	clk_writel(*ctx++, tegra_pll_a.reg + PLL_BASE);
 	clk_writel(*ctx++, tegra_pll_a.reg + PLL_MISC(&tegra_pll_a));
+	clk_writel(*ctx++, tegra_pll_d.reg + PLL_BASE);
+	clk_writel(*ctx++, tegra_pll_d.reg + PLL_MISC(&tegra_pll_d));
 	udelay(300);
 
 	clk_writel(*ctx++, tegra_pll_m_out1.reg);
