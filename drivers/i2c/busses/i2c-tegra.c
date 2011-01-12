@@ -494,8 +494,13 @@ static int tegra_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[],
 	rt_mutex_lock(&i2c_dev->dev_lock);
 
 	if (i2c_dev->last_mux != i2c_bus->mux) {
-		tegra_pinmux_set_safe_pinmux_table(i2c_dev->last_mux,
-			i2c_dev->last_mux_len);
+		for (i = 0; i < i2c_dev->bus_count; i++) {
+			struct tegra_i2c_bus *mbus = &i2c_dev->busses[i];
+
+			if (i2c_bus->mux != mbus->mux)
+				tegra_pinmux_set_safe_pinmux_table(mbus->mux,
+					mbus->mux_len);
+		}
 		tegra_pinmux_config_pinmux_table(i2c_bus->mux,
 			i2c_bus->mux_len);
 		i2c_dev->last_mux = i2c_bus->mux;
