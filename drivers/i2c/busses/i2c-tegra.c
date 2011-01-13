@@ -656,6 +656,16 @@ static int tegra_i2c_probe(struct platform_device *pdev)
 			dev_err(&pdev->dev, "Failed to add I2C adapter\n");
 			goto err_del_bus;
 		}
+
+		if (!i2c_dev->bus_count) {
+			tegra_pinmux_config_pinmux_table(i2c_bus->mux,
+				i2c_bus->mux_len);
+			i2c_dev->last_mux = i2c_bus->mux;
+			i2c_dev->last_mux_len = i2c_bus->mux_len;
+		} else {
+			tegra_pinmux_set_safe_pinmux_table(i2c_bus->mux,
+				i2c_bus->mux_len);
+		}
 		i2c_dev->bus_count++;
 	}
 
