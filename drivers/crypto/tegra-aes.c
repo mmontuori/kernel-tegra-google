@@ -30,7 +30,6 @@
 #include <linux/dma-mapping.h>
 #include <linux/io.h>
 #include <linux/mutex.h>
-#include <linux/interrupt.h>
 #include <linux/completion.h>
 #include <linux/workqueue.h>
 
@@ -237,7 +236,6 @@ static int aes_hw_init(struct tegra_aes_dev *dd)
 		return ret;
 	}
 
-	aes_writel(dd, 0x33, INT_ENB);
 	return ret;
 }
 
@@ -251,7 +249,7 @@ static int aes_start_crypt(struct tegra_aes_dev *dd, u32 in_addr, u32 out_addr,
 	int nblocks, int mode, bool upd_iv)
 {
 	u32 cmdq[AES_HW_MAX_ICQ_LENGTH];
-	int qlen = 0, i, eng_busy, icq_empty, dma_busy, ret = 0;
+	int qlen = 0, i, eng_busy, icq_empty, dma_busy;
 	u32 value;
 
 	cmdq[qlen++] = UCQOPCODE_DMASETUP << ICQBITSHIFT_OPCODE;
@@ -317,26 +315,29 @@ static int aes_start_crypt(struct tegra_aes_dev *dd, u32 in_addr, u32 out_addr,
 	aes_writel(dd, value, SECURE_INPUT_SELECT);
 
 	aes_writel(dd, out_addr, SECURE_DEST_ADDR);
-	INIT_COMPLETION(dd->op_complete);
+	do {
+		value = aes_readl(dd, INTR_STATUS);
+		eng_busy = value & BIT(1);
+		icq_empty = value & BIT(3);
+	} while (eng_busy & (!icq_empty));
 
 	for (i = 0; i < qlen - 1; i++) {
+		aes_writel(dd, cmdq[i], ICMDQUE_WR);
 		do {
 			value = aes_readl(dd, INTR_STATUS);
-			eng_busy = value & (0x1);
-			icq_empty = value & (0x1<<3);
-			dma_busy = value & (0x1<<23);
-		} while (eng_busy & (!icq_empty) & dma_busy);
-		aes_writel(dd, cmdq[i], ICMDQUE_WR);
-	}
-
-	ret = wait_for_completion_timeout(&dd->op_complete, msecs_to_jiffies(150));
-	if (ret == 0) {
-		dev_err(dd->dev, "timed out (0x%x)\n",
-			aes_readl(dd, INTR_STATUS));
-		return -ETIMEDOUT;
+			eng_busy = value & BIT(1);
+			icq_empty = value & BIT(3);
+		} while (eng_busy & (!icq_empty));
 	}
 
 	aes_writel(dd, cmdq[qlen - 1], ICMDQUE_WR);
+	do {
+		value = aes_readl(dd, INTR_STATUS);
+		eng_busy = value & BIT(1);
+		icq_empty = value & BIT(3);
+		dma_busy = value & BIT(9);
+	} while (eng_busy & (!icq_empty) & dma_busy);
+
 	return 0;
 }
 
@@ -418,9 +419,9 @@ static int aes_set_key(struct tegra_aes_dev *dd)
 
 	do {
 		value = aes_readl(dd, INTR_STATUS);
-		eng_busy = value & (0x1);
-		icq_empty = value & (0x1<<3);
-		dma_busy = value & (0x1<<23);
+		eng_busy = value & BIT(1);
+		icq_empty = value & BIT(3);
+		dma_busy = value & BIT(23);
 	} while (eng_busy & (!icq_empty) & dma_busy);
 
 	/* settable command to get key into internal registers */
@@ -433,8 +434,8 @@ static int aes_set_key(struct tegra_aes_dev *dd)
 	aes_writel(dd, value, ICMDQUE_WR);
 	do {
 		value = aes_readl(dd, INTR_STATUS);
-		eng_busy = value & (0x1);
-		icq_empty = value & (0x1<<3);
+		eng_busy = value & BIT(1);
+		icq_empty = value & BIT(3);
 	} while (eng_busy & (!icq_empty));
 
 out:
@@ -657,18 +658,6 @@ static void aes_workqueue_handler(struct work_struct *work)
 	do {
 		ret = tegra_aes_handle_req(dd);
 	} while (!ret);
-}
-
-static irqreturn_t aes_irq(int irq, void *dev_id)
-{
-	struct tegra_aes_dev *dd = (struct tegra_aes_dev *)dev_id;
-	u32 value = aes_readl(dd, INTR_STATUS);
-
-	dev_dbg(dd->dev, "irq_stat: 0x%x", value);
-	if (!((value & ENGINE_BUSY_FIELD) & !(value & ICQ_EMPTY_FIELD)))
-		complete(&dd->op_complete);
-
-	return IRQ_HANDLED;
 }
 
 static int tegra_aes_crypt(struct ablkcipher_request *req, unsigned long mode)
@@ -1037,14 +1026,6 @@ static int tegra_aes_probe(struct platform_device *pdev)
 		goto out;
 	}
 
-	/* get the irq */
-	err = request_irq(INT_VDE_BSE_V, aes_irq, IRQF_TRIGGER_HIGH,
-		"tegra-aes", dd);
-	if (err) {
-		dev_err(dev, "request_irq failed\n");
-		goto out;
-	}
-
 	spin_lock_init(&list_lock);
 	spin_lock(&list_lock);
 	for (i = 0; i < AES_NR_KEYSLOTS; i++) {
@@ -1086,7 +1067,6 @@ out:
 		clk_put(dd->pclk);
 	if (aes_wq)
 		destroy_workqueue(aes_wq);
-	free_irq(INT_VDE_BSE_V, dd);
 	spin_lock(&list_lock);
 	list_del(&dev_list);
 	spin_unlock(&list_lock);
@@ -1109,7 +1089,6 @@ static int __devexit tegra_aes_remove(struct platform_device *pdev)
 
 	cancel_work_sync(&aes_work);
 	destroy_workqueue(aes_wq);
-	free_irq(INT_VDE_BSE_V, dd);
 	spin_lock(&list_lock);
 	list_del(&dev_list);
 	spin_unlock(&list_lock);
