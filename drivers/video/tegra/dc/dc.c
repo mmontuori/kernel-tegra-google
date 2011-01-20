@@ -500,6 +500,9 @@ int tegra_dc_update_windows(struct tegra_dc_win *windows[], int n)
 		struct tegra_dc_win *win = windows[i];
 		unsigned h_dda;
 		unsigned v_dda;
+		unsigned h_offset;
+		unsigned h_prescaled;
+		unsigned v_prescaled;
 		bool yuvp = tegra_dc_is_yuv_planar(win->fmt);
 
 		if (win->z != dc->blend.z[win->idx]) {
@@ -533,16 +536,32 @@ int tegra_dc_update_windows(struct tegra_dc_win *windows[], int n)
 		tegra_dc_writel(dc,
 				V_SIZE(win->out_h) | H_SIZE(win->out_w),
 				DC_WIN_SIZE);
+		/* yuv planar prescaled must be from even byte boundaries */
+		if (yuvp) {
+			h_prescaled = ((win->x + win->w + 1) & ~1) -
+				(win->x & ~1);
+			v_prescaled = (win->h + 1) & ~1;
+
+		} else {
+			h_prescaled = win->w;
+			v_prescaled = win->h;
+		}
+
 		tegra_dc_writel(dc,
-				V_PRESCALED_SIZE(win->h) |
-				H_PRESCALED_SIZE(win->w * tegra_dc_fmt_bpp(win->fmt) / 8),
+				V_PRESCALED_SIZE(v_prescaled) |
+				H_PRESCALED_SIZE((h_prescaled *
+						  tegra_dc_fmt_bpp(win->fmt) / 8)),
 				DC_WIN_PRESCALED_SIZE);
 
 		h_dda = ((win->w - 1) * 0x1000) / max_t(int, win->out_w - 1, 1);
 		v_dda = ((win->h - 1) * 0x1000) / max_t(int, win->out_h - 1, 1);
 		tegra_dc_writel(dc, V_DDA_INC(v_dda) | H_DDA_INC(h_dda),
 				DC_WIN_DDA_INCREMENT);
-		tegra_dc_writel(dc, 0, DC_WIN_H_INITIAL_DDA);
+		if (yuvp)
+			tegra_dc_writel(dc, (win->x & 0x1) ? 0x1000 : 0,
+					DC_WIN_H_INITIAL_DDA);
+		else
+			tegra_dc_writel(dc, 0, DC_WIN_H_INITIAL_DDA);
 		tegra_dc_writel(dc, 0, DC_WIN_V_INITIAL_DDA);
 
 		tegra_dc_writel(dc, 0, DC_WIN_BUF_STRIDE);
@@ -566,9 +585,12 @@ int tegra_dc_update_windows(struct tegra_dc_win *windows[], int n)
 					UV_LINE_STRIDE(win->stride_uv),
 					DC_WIN_LINE_STRIDE);
 		}
+		/* yuv planar h_offset must be even */
+		h_offset = (win->x * tegra_dc_fmt_bpp(win->fmt) / 8);
+		if (yuvp)
+			h_offset &= ~1;
 
-		tegra_dc_writel(dc, win->x * tegra_dc_fmt_bpp(win->fmt) / 8,
-				DC_WINBUF_ADDR_H_OFFSET);
+		tegra_dc_writel(dc, h_offset, DC_WINBUF_ADDR_H_OFFSET);
 		tegra_dc_writel(dc, win->y, DC_WINBUF_ADDR_V_OFFSET);
 
 		val = WIN_ENABLE;
