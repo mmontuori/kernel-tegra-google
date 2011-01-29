@@ -147,43 +147,44 @@ struct tegra_aes_reqctx {
 #define TEGRA_AES_QUEUE_LENGTH 50
 
 struct tegra_aes_dev {
-	struct device *dev;
-	unsigned long phys_base;
-	void __iomem *io_base;
-	dma_addr_t ivkey_phys_base;
-	void __iomem *ivkey_base;
-	struct clk *iclk;
-	struct clk *pclk;
-	struct tegra_aes_ctx *ctx;
-	unsigned long flags;
-	struct completion op_complete;
-	u32 *buf_in;
-	dma_addr_t dma_buf_in;
-	u32 *buf_out;
-	dma_addr_t dma_buf_out;
-	u8 *iv;
-	u8 dt[DEFAULT_RNG_BLK_SZ];
-	int ivlen;
-	u64 ctr;
-	int res_id;
-	spinlock_t lock;
-	struct crypto_queue queue;
-	struct tegra_aes_slot *slots;
-	struct ablkcipher_request *req;
-	size_t total;
-	struct scatterlist *in_sg;
-	size_t in_offset;
-	struct scatterlist *out_sg;
-	size_t out_offset;
+	struct device		*dev;
+	unsigned long		phys_base;
+	void __iomem		*io_base;
+	dma_addr_t		ivkey_phys_base;
+	void __iomem		*ivkey_base;
+	struct clk		*iclk;
+	struct clk		*pclk;
+	struct tegra_aes_ctx	*ctx;
+	unsigned long		flags;
+	struct completion	op_complete;
+	u32			*buf_in;
+	dma_addr_t		dma_buf_in;
+	u32			*buf_out;
+	dma_addr_t		dma_buf_out;
+	u8			*iv;
+	u8			dt[DEFAULT_RNG_BLK_SZ];
+	int			ivlen;
+	u64			ctr;
+	int			res_id;
+	spinlock_t		lock;
+	struct crypto_queue	queue;
+	struct tegra_aes_slot	*slots;
+	struct ablkcipher_request	*req;
+	size_t			total;
+	struct scatterlist	*in_sg;
+	size_t			in_offset;
+	struct scatterlist	*out_sg;
+	size_t			out_offset;
+	atomic_t		powered_down;
 };
 
 static struct tegra_aes_dev *aes_dev;
 
 struct tegra_aes_ctx {
-	struct tegra_aes_dev *dd;
-	unsigned long flags;
-	struct tegra_aes_slot *slot;
-	int keylen;
+	struct tegra_aes_dev	*dd;
+	unsigned long		flags;
+	struct tegra_aes_slot	*slot;
+	int			keylen;
 };
 
 static struct tegra_aes_ctx rng_ctx = {
@@ -648,6 +649,8 @@ static void aes_workqueue_handler(struct work_struct *work)
 
 	do {
 		ret = tegra_aes_handle_req(dd);
+		if (atomic_read(&dd->powered_down))
+			break;
 	} while (!ret);
 }
 
@@ -682,7 +685,7 @@ static int tegra_aes_crypt(struct ablkcipher_request *req, unsigned long mode)
 	busy = test_and_set_bit(FLAGS_BUSY, &dd->flags);
 	spin_unlock_irqrestore(&dd->lock, flags);
 
-	if (!busy)
+	if (!busy && !atomic_read(&dd->powered_down))
 		queue_work(aes_wq, &aes_work);
 
 	return err;
@@ -1131,9 +1134,31 @@ static int __devexit tegra_aes_remove(struct platform_device *pdev)
 	return 0;
 }
 
+static int tegra_aes_suspend(struct platform_device *pdev, pm_message_t state)
+{
+	struct tegra_aes_dev *dd = platform_get_drvdata(pdev);
+
+	atomic_set(&dd->powered_down, 1);
+	cancel_work_sync(&aes_work);
+	disable_irq(INT_VDE_BSE_V);
+	return 0;
+}
+
+static int tegra_aes_resume(struct platform_device *pdev)
+{
+	struct tegra_aes_dev *dd = platform_get_drvdata(pdev);
+
+	enable_irq(INT_VDE_BSE_V);
+	queue_work(aes_wq, &aes_work);
+	atomic_set(&dd->powered_down, 0);
+	return 0;
+}
+
 static struct platform_driver tegra_aes_driver = {
 	.probe  = tegra_aes_probe,
 	.remove = __devexit_p(tegra_aes_remove),
+	.suspend = tegra_aes_suspend,
+	.resume = tegra_aes_resume,
 	.driver = {
 		.name   = "tegra-aes",
 		.owner  = THIS_MODULE,
