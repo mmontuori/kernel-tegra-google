@@ -181,6 +181,9 @@
 
 /*-------------------------------------------------------------------------*/
 
+/* access ops for controllers with a viewport register */
+extern struct otg_io_access_ops ulpi_viewport_access_ops;
+
 struct otg_transceiver *otg_ulpi_create(struct otg_io_access_ops *ops,
 					unsigned int flags);
 

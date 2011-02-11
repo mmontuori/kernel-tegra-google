@@ -26,15 +26,74 @@
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/usb.h>
+#include <linux/io.h>
 #include <linux/usb/otg.h>
 #include <linux/usb/ulpi.h>
 
 #define ULPI_ID(vendor, product) (((vendor) << 16) | (product))
 
+#define ULPI_VIEW_WAKEUP	(1 << 31)
+#define ULPI_VIEW_RUN		(1 << 30)
+#define ULPI_VIEW_WRITE		(1 << 29)
+#define ULPI_VIEW_READ		(0 << 29)
+#define ULPI_VIEW_ADDR(x)	(((x) & 0xff) << 16)
+#define ULPI_VIEW_DATA_READ(x)	(((x) & 0xff) << 8)
+#define ULPI_VIEW_DATA_WRITE(x)	(((x) & 0xff) << 0)
+
 /* ULPI hardcoded IDs, used for probing */
 static unsigned int ulpi_ids[] = {
 	ULPI_ID(0x04cc, 0x1504),	/* NXP ISP1504 */
 	ULPI_ID(0x0424, 0x0006),        /* SMSC USB3319 */
+};
+
+static int ulpi_viewport_wait(void __iomem *view, u32 mask, u32 res)
+{
+	unsigned long timeout = 2000;
+
+	while (timeout--) {
+		if ((readl(view) & mask) == res)
+			return 0;
+		cpu_relax();
+	};
+	return -ETIMEDOUT;
+}
+
+static int ulpi_viewport_read(struct otg_transceiver *otg, u32 reg)
+{
+	int ret;
+	void __iomem *view = otg->io_priv;
+
+	writel(ULPI_VIEW_WAKEUP | ULPI_VIEW_WRITE, view);
+	ret = ulpi_viewport_wait(view, ULPI_VIEW_WAKEUP, 0);
+	if (ret)
+		return ret;
+
+	writel(ULPI_VIEW_RUN | ULPI_VIEW_READ | ULPI_VIEW_ADDR(reg), view);
+	ret = ulpi_viewport_wait(view, ULPI_VIEW_RUN, 0);
+	if (ret)
+		return ret;
+
+	return ULPI_VIEW_DATA_READ(readl(view));
+}
+
+static int ulpi_viewport_write(struct otg_transceiver *otg, u32 val, u32 reg)
+{
+	int ret;
+	void __iomem *view = otg->io_priv;
+
+	writel(ULPI_VIEW_WAKEUP | ULPI_VIEW_WRITE, view);
+	ret = ulpi_viewport_wait(view, ULPI_VIEW_WAKEUP, 0);
+	if (ret)
+		return ret;
+
+	writel(ULPI_VIEW_RUN | ULPI_VIEW_WRITE | ULPI_VIEW_DATA_WRITE(val) |
+						 ULPI_VIEW_ADDR(reg), view);
+	return ulpi_viewport_wait(view, ULPI_VIEW_RUN, 0);
+}
+
+struct otg_io_access_ops ulpi_viewport_access_ops = {
+	.read	= ulpi_viewport_read,
+	.write	= ulpi_viewport_write,
 };
 
 static int ulpi_set_otg_flags(struct otg_transceiver *otg)
