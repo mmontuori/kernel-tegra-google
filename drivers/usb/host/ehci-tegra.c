@@ -211,15 +211,9 @@ static int tegra_ehci_reset(struct usb_hcd *hcd)
 
 static void tegra_ehci_restart(struct usb_hcd *hcd)
 {
-	unsigned int temp;
 	struct ehci_hcd *ehci = hcd_to_ehci(hcd);
 
 	tegra_ehci_reset(hcd);
-
-	/* Set to Host mode by setting bit 0-1 of USB device mode register */
-	temp = readl(hcd->regs + TEGRA_USB_USBMODE_REG_OFFSET);
-	writel((temp | TEGRA_USB_USBMODE_HOST),
-		(hcd->regs + TEGRA_USB_USBMODE_REG_OFFSET));
 
 	/* setup the frame list and Async q heads */
 	ehci_writel(ehci, ehci->periodic_dma, &ehci->regs->frame_list);
