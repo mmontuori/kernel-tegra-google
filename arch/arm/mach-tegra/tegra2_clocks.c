@@ -152,6 +152,13 @@ static void __iomem *reg_clk_base = IO_ADDRESS(TEGRA_CLK_RESET_BASE);
 static void __iomem *reg_pmc_base = IO_ADDRESS(TEGRA_PMC_BASE);
 
 /*
+ * Some clocks share a register with other clocks.  Any clock op that
+ * non-atomically modifies a register used by another clock must lock
+ * clock_register_lock first.
+ */
+static DEFINE_SPINLOCK(clock_register_lock);
+
+/*
  * Some peripheral clocks share an enable bit, so refcount the enable bits
  * in registers CLK_ENABLE_L, CLK_ENABLE_H, and CLK_ENABLE_U
  */
@@ -465,24 +472,45 @@ static void tegra2_bus_clk_init(struct clk *c)
 
 static int tegra2_bus_clk_enable(struct clk *c)
 {
-	u32 val = clk_readl(c->reg);
+	u32 val;
+	unsigned long flags;
+
+	spin_lock_irqsave(&clock_register_lock, flags);
+
+	val = clk_readl(c->reg);
 	val &= ~(BUS_CLK_DISABLE << c->reg_shift);
 	clk_writel(val, c->reg);
+
+	spin_unlock_irqrestore(&clock_register_lock, flags);
+
 	return 0;
 }
 
 static void tegra2_bus_clk_disable(struct clk *c)
 {
-	u32 val = clk_readl(c->reg);
+	u32 val;
+	unsigned long flags;
+
+	spin_lock_irqsave(&clock_register_lock, flags);
+
+	val = clk_readl(c->reg);
 	val |= BUS_CLK_DISABLE << c->reg_shift;
 	clk_writel(val, c->reg);
+
+	spin_unlock_irqrestore(&clock_register_lock, flags);
 }
 
 static int tegra2_bus_clk_set_rate(struct clk *c, unsigned long rate)
 {
-	u32 val = clk_readl(c->reg);
+	u32 val;
 	unsigned long parent_rate = clk_get_rate(c->parent);
+	unsigned long flags;
+	int ret = -EINVAL;
 	int i;
+
+	spin_lock_irqsave(&clock_register_lock, flags);
+
+	val = clk_readl(c->reg);
 	for (i = 1; i <= 4; i++) {
 		if (rate == parent_rate / i) {
 			val &= ~(BUS_CLK_DIV_MASK << c->reg_shift);
@@ -490,10 +518,14 @@ static int tegra2_bus_clk_set_rate(struct clk *c, unsigned long rate)
 			clk_writel(val, c->reg);
 			c->div = i;
 			c->mul = 1;
-			return 0;
+			ret = 0;
+			break;
 		}
 	}
-	return -EINVAL;
+
+	spin_unlock_irqrestore(&clock_register_lock, flags);
+
+	return ret;
 }
 
 static struct clk_ops tegra_bus_ops = {
@@ -737,9 +769,11 @@ static int tegra2_pll_div_clk_enable(struct clk *c)
 {
 	u32 val;
 	u32 new_val;
+	unsigned long flags;
 
 	pr_debug("%s: %s\n", __func__, c->name);
 	if (c->flags & DIV_U71) {
+		spin_lock_irqsave(&clock_register_lock, flags);
 		val = clk_readl(c->reg);
 		new_val = val >> c->reg_shift;
 		new_val &= 0xFFFF;
@@ -749,12 +783,15 @@ static int tegra2_pll_div_clk_enable(struct clk *c)
 		val &= ~(0xFFFF << c->reg_shift);
 		val |= new_val << c->reg_shift;
 		clk_writel(val, c->reg);
+		spin_unlock_irqrestore(&clock_register_lock, flags);
 		return 0;
 	} else if (c->flags & DIV_2) {
 		BUG_ON(!(c->flags & PLLD));
+		spin_lock_irqsave(&clock_register_lock, flags);
 		val = clk_readl(c->reg);
 		val &= ~PLLD_MISC_DIV_RST;
 		clk_writel(val, c->reg);
+		spin_unlock_irqrestore(&clock_register_lock, flags);
 		return 0;
 	}
 	return -EINVAL;
@@ -764,9 +801,11 @@ static void tegra2_pll_div_clk_disable(struct clk *c)
 {
 	u32 val;
 	u32 new_val;
+	unsigned long flags;
 
 	pr_debug("%s: %s\n", __func__, c->name);
 	if (c->flags & DIV_U71) {
+		spin_lock_irqsave(&clock_register_lock, flags);
 		val = clk_readl(c->reg);
 		new_val = val >> c->reg_shift;
 		new_val &= 0xFFFF;
@@ -776,11 +815,14 @@ static void tegra2_pll_div_clk_disable(struct clk *c)
 		val &= ~(0xFFFF << c->reg_shift);
 		val |= new_val << c->reg_shift;
 		clk_writel(val, c->reg);
+		spin_unlock_irqrestore(&clock_register_lock, flags);
 	} else if (c->flags & DIV_2) {
 		BUG_ON(!(c->flags & PLLD));
+		spin_lock_irqsave(&clock_register_lock, flags);
 		val = clk_readl(c->reg);
 		val |= PLLD_MISC_DIV_RST;
 		clk_writel(val, c->reg);
+		spin_unlock_irqrestore(&clock_register_lock, flags);
 	}
 }
 
@@ -790,11 +832,13 @@ static int tegra2_pll_div_clk_set_rate(struct clk *c, unsigned long rate)
 	u32 new_val;
 	int divider_u71;
 	unsigned long parent_rate = clk_get_rate(c->parent);
+	unsigned long flags;
 
 	pr_debug("%s: %s %lu\n", __func__, c->name, rate);
 	if (c->flags & DIV_U71) {
 		divider_u71 = clk_div71_get_divider(parent_rate, rate);
 		if (divider_u71 >= 0) {
+			spin_lock_irqsave(&clock_register_lock, flags);
 			val = clk_readl(c->reg);
 			new_val = val >> c->reg_shift;
 			new_val &= 0xFFFF;
@@ -808,6 +852,7 @@ static int tegra2_pll_div_clk_set_rate(struct clk *c, unsigned long rate)
 			clk_writel(val, c->reg);
 			c->div = divider_u71 + 2;
 			c->mul = 2;
+			spin_unlock_irqrestore(&clock_register_lock, flags);
 			return 0;
 		}
 	} else if (c->flags & DIV_2) {
@@ -887,10 +932,17 @@ static void tegra2_periph_clk_init(struct clk *c)
 static int tegra2_periph_clk_enable(struct clk *c)
 {
 	u32 val;
+	unsigned long flags;
+	int refcount;
 	pr_debug("%s on clock %s\n", __func__, c->name);
 
-	tegra_periph_clk_enable_refcount[c->u.periph.clk_num]++;
-	if (tegra_periph_clk_enable_refcount[c->u.periph.clk_num] > 1)
+	spin_lock_irqsave(&clock_register_lock, flags);
+
+	refcount = tegra_periph_clk_enable_refcount[c->u.periph.clk_num]++;
+
+	spin_unlock_irqrestore(&clock_register_lock, flags);
+
+	if (refcount > 1)
 		return 0;
 
 	clk_writel(PERIPH_CLK_TO_ENB_BIT(c),
@@ -910,7 +962,11 @@ static int tegra2_periph_clk_enable(struct clk *c)
 
 static void tegra2_periph_clk_disable(struct clk *c)
 {
+	unsigned long flags;
+
 	pr_debug("%s on clock %s\n", __func__, c->name);
+
+	spin_lock_irqsave(&clock_register_lock, flags);
 
 	if (c->refcnt)
 		tegra_periph_clk_enable_refcount[c->u.periph.clk_num]--;
@@ -918,6 +974,8 @@ static void tegra2_periph_clk_disable(struct clk *c)
 	if (tegra_periph_clk_enable_refcount[c->u.periph.clk_num] == 0)
 		clk_writel(PERIPH_CLK_TO_ENB_BIT(c),
 			CLK_OUT_ENB_CLR + PERIPH_CLK_TO_ENB_SET_REG(c));
+
+	spin_unlock_irqrestore(&clock_register_lock, flags);
 }
 
 static void tegra2_periph_clk_reset(struct clk *c, bool assert)
