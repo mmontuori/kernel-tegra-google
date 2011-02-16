@@ -225,6 +225,7 @@ static int tegra_retrigger(unsigned int irq)
 static struct irq_chip tegra_irq = {
 	.name		= "PPI",
 	.ack		= tegra_ack,
+	.disable	= tegra_mask,
 	.mask		= tegra_mask,
 	.unmask		= tegra_unmask,
 	.set_wake	= tegra_set_wake,
