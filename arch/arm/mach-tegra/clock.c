@@ -90,29 +90,6 @@ static inline bool clk_is_dvfs(struct clk *c)
 	return (c->dvfs != NULL);
 }
 
-static inline bool clk_cansleep(struct clk *c)
-{
-	return c->cansleep;
-}
-
-#define clk_lock_save(c, flags)						\
-	do {								\
-		if (clk_cansleep(c)) {					\
-			flags = 0;					\
-			mutex_lock(&c->mutex);				\
-		} else {						\
-			spin_lock_irqsave(&c->spinlock, flags);		\
-		}							\
-	} while (0)
-
-#define clk_unlock_restore(c, flags)					\
-	do {								\
-		if (clk_cansleep(c))					\
-			mutex_unlock(&c->mutex);			\
-		else							\
-			spin_unlock_irqrestore(&c->spinlock, flags);	\
-	} while (0)
-
 static inline void clk_lock_init(struct clk *c)
 {
 	mutex_init(&c->mutex);
@@ -346,18 +323,15 @@ struct clk *clk_get_parent(struct clk *c)
 }
 EXPORT_SYMBOL(clk_get_parent);
 
-int clk_set_rate(struct clk *c, unsigned long rate)
+int clk_set_rate_locked(struct clk *c, unsigned long rate)
 {
 	int ret = 0;
-	unsigned long flags;
 	unsigned long old_rate;
 	long new_rate;
 
-	clk_lock_save(c, flags);
 
 	if (!c->ops || !c->ops->set_rate) {
-		ret = -ENOSYS;
-		goto out;
+		return -ENOSYS;
 	}
 
 	old_rate = clk_get_rate_locked(c);
@@ -369,8 +343,7 @@ int clk_set_rate(struct clk *c, unsigned long rate)
 		new_rate = c->ops->round_rate(c, rate);
 
 		if (new_rate < 0) {
-			ret = new_rate;
-			goto out;
+			return new_rate;
 		}
 
 		rate = new_rate;
@@ -379,18 +352,30 @@ int clk_set_rate(struct clk *c, unsigned long rate)
 	if (clk_is_auto_dvfs(c) && rate > old_rate && c->refcnt > 0) {
 		ret = tegra_dvfs_set_rate(c, rate);
 		if (ret)
-			goto out;
+			return ret;
 	}
 
 	ret = c->ops->set_rate(c, rate);
 	if (ret)
-		goto out;
+		return ret;
 
 	if (clk_is_auto_dvfs(c) && rate < old_rate && c->refcnt > 0)
 		ret = tegra_dvfs_set_rate(c, rate);
 
-out:
+	return ret;
+}
+
+int clk_set_rate(struct clk *c, unsigned long rate)
+{
+	unsigned long flags;
+	int ret;
+
+	clk_lock_save(c, flags);
+
+	ret = clk_set_rate_locked(c, rate);
+
 	clk_unlock_restore(c, flags);
+
 	return ret;
 }
 EXPORT_SYMBOL(clk_set_rate);

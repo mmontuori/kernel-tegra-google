@@ -1272,7 +1272,7 @@ static struct clk_ops tegra_cdev_clk_ops = {
  * enabled shared_bus_user clock, with a minimum value set by the
  * shared bus.
  */
-static void tegra_clk_shared_bus_update(struct clk *bus)
+static int tegra_clk_shared_bus_update(struct clk *bus)
 {
 	struct clk *c;
 	unsigned long rate = bus->min_rate;
@@ -1283,26 +1283,46 @@ static void tegra_clk_shared_bus_update(struct clk *bus)
 			rate = max(c->u.shared_bus_user.rate, rate);
 	}
 
-	if (rate != clk_get_rate(bus))
-		clk_set_rate(bus, rate);
+	if (rate == clk_get_rate_locked(bus))
+		return 0;
+
+	return clk_set_rate_locked(bus, rate);
 };
 
 static void tegra_clk_shared_bus_init(struct clk *c)
 {
+	unsigned long flags;
+
 	c->max_rate = c->parent->max_rate;
 	c->u.shared_bus_user.rate = c->parent->max_rate;
 	c->state = OFF;
 	c->set = true;
 
+	clk_lock_save(c->parent, flags);
+
 	list_add_tail(&c->u.shared_bus_user.node,
 		&c->parent->shared_bus_list);
+
+	clk_unlock_restore(c->parent, flags);
 }
 
 static int tegra_clk_shared_bus_set_rate(struct clk *c, unsigned long rate)
 {
+	unsigned long flags;
+	int ret;
+
+	rate = clk_round_rate(c->parent, rate);
+	if (rate < 0)
+		return rate;
+
+	clk_lock_save(c->parent, flags);
+
 	c->u.shared_bus_user.rate = rate;
-	tegra_clk_shared_bus_update(c->parent);
-	return 0;
+	ret = tegra_clk_shared_bus_update(c->parent);
+
+	clk_unlock_restore(c->parent, flags);
+
+	return ret;
 }
 
 static long tegra_clk_shared_bus_round_rate(struct clk *c, unsigned long rate)
@@ -1312,15 +1332,31 @@ static long tegra_clk_shared_bus_round_rate(struct clk *c, unsigned long rate)
 
 static int tegra_clk_shared_bus_enable(struct clk *c)
 {
+	unsigned long flags;
+	int ret;
+
+	clk_lock_save(c->parent, flags);
+
 	c->u.shared_bus_user.enabled = true;
-	tegra_clk_shared_bus_update(c->parent);
-	return 0;
+	ret = tegra_clk_shared_bus_update(c->parent);
+
+	clk_unlock_restore(c->parent, flags);
+
+	return ret;
 }
 
 static void tegra_clk_shared_bus_disable(struct clk *c)
 {
+	unsigned long flags;
+	int ret;
+
+	clk_lock_save(c->parent, flags);
+
 	c->u.shared_bus_user.enabled = false;
-	tegra_clk_shared_bus_update(c->parent);
+	ret = tegra_clk_shared_bus_update(c->parent);
+	WARN_ON_ONCE(ret);
+
+	clk_unlock_restore(c->parent, flags);
 }
 
 static struct clk_ops tegra_clk_shared_bus_ops = {

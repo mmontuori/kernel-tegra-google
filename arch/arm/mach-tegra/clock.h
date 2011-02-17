@@ -162,6 +162,30 @@ int clk_reparent(struct clk *c, struct clk *parent);
 void tegra_clk_init_from_table(struct tegra_clk_init_table *table);
 void clk_set_cansleep(struct clk *c);
 unsigned long clk_get_rate_locked(struct clk *c);
+int clk_set_rate_locked(struct clk *c, unsigned long rate);
 void tegra2_sdmmc_tap_delay(struct clk *c, int delay);
+
+static inline bool clk_cansleep(struct clk *c)
+{
+	return c->cansleep;
+}
+
+#define clk_lock_save(c, flags)						\
+	do {								\
+		if (clk_cansleep(c)) {					\
+			flags = 0;					\
+			mutex_lock(&c->mutex);				\
+		} else {						\
+			spin_lock_irqsave(&c->spinlock, flags);		\
+		}							\
+	} while (0)
+
+#define clk_unlock_restore(c, flags)					\
+	do {								\
+		if (clk_cansleep(c))					\
+			mutex_unlock(&c->mutex);			\
+		else							\
+			spin_unlock_irqrestore(&c->spinlock, flags);	\
+	} while (0)
 
 #endif
