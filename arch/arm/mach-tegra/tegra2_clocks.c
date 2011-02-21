@@ -940,10 +940,8 @@ static int tegra2_periph_clk_enable(struct clk *c)
 
 	refcount = tegra_periph_clk_enable_refcount[c->u.periph.clk_num]++;
 
-	spin_unlock_irqrestore(&clock_register_lock, flags);
-
 	if (refcount > 1)
-		return 0;
+		goto out;
 
 	clk_writel(PERIPH_CLK_TO_ENB_BIT(c),
 		CLK_OUT_ENB_SET + PERIPH_CLK_TO_ENB_SET_REG(c));
@@ -957,6 +955,10 @@ static int tegra2_periph_clk_enable(struct clk *c)
 		val |= 0x3 << 24;
 		clk_writel(val, c->reg);
 	}
+
+out:
+	spin_unlock_irqrestore(&clock_register_lock, flags);
+
 	return 0;
 }
 
