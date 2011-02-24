@@ -711,7 +711,6 @@ void tegra_dc_setup_clk(struct tegra_dc *dc, struct clk *clk)
 
 	pclk = tegra_dc_pclk_round_rate(dc, dc->mode.pclk);
 	tegra_dvfs_set_rate(clk, pclk);
-
 }
 
 static int tegra_dc_program_mode(struct tegra_dc *dc, struct tegra_dc_mode *mode)
@@ -787,7 +786,6 @@ static int tegra_dc_program_mode(struct tegra_dc *dc, struct tegra_dc_mode *mode
 	return 0;
 }
 
-
 int tegra_dc_set_mode(struct tegra_dc *dc, const struct tegra_dc_mode *mode)
 {
 	memcpy(&dc->mode, mode, sizeof(dc->mode));
@@ -819,7 +817,6 @@ static void tegra_dc_set_out(struct tegra_dc *dc, struct tegra_dc_out *out)
 
 	if (dc->out_ops && dc->out_ops->init)
 		dc->out_ops->init(dc);
-
 }
 
 unsigned tegra_dc_get_out_height(struct tegra_dc *dc)
@@ -893,8 +890,8 @@ static irqreturn_t tegra_dc_irq(int irq, void *ptr)
 	if (status & V_BLANK_INT) {
 		int i;
 
-		for (i = 0; i< DC_N_WINDOWS; i++) {
-			if (dc->underflow_mask & (WIN_A_UF_INT <<i)) {
+		for (i = 0; i < DC_N_WINDOWS; i++) {
+			if (dc->underflow_mask & (WIN_A_UF_INT << i)) {
 				dc->windows[i].underflows++;
 
 				if (dc->windows[i].underflows > 4)
@@ -912,7 +909,6 @@ static irqreturn_t tegra_dc_irq(int irq, void *ptr)
 
 		dc->underflow_mask = 0;
 	}
-
 
 	return IRQ_HANDLED;
 }
@@ -1093,7 +1089,6 @@ static void _tegra_dc_disable(struct tegra_dc *dc)
 	tegra_dc_io_end(dc);
 }
 
-
 void tegra_dc_disable(struct tegra_dc *dc)
 {
 	mutex_lock(&dc->lock);
@@ -1124,7 +1119,6 @@ static void tegra_dc_reset_worker(struct work_struct *work)
 	_tegra_dc_enable(dc);
 	mutex_unlock(&dc->lock);
 }
-
 
 static int tegra_dc_probe(struct nvhost_device *ndev)
 {
@@ -1195,6 +1189,7 @@ static int tegra_dc_probe(struct nvhost_device *ndev)
 		goto err_put_clk;
 	}
 
+	dc->syncpt_id = NVSYNCPT_INVALID;
 	dc->clk = clk;
 	dc->emc_clk = emc_clk;
 	dc->base_res = base_res;
