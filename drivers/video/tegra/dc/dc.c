@@ -503,6 +503,8 @@ int tegra_dc_update_windows(struct tegra_dc_win *windows[], int n)
 		unsigned h_offset;
 		unsigned h_prescaled;
 		unsigned v_prescaled;
+		bool flip_h = (win->flags & TEGRA_WIN_FLAG_FLIP_H) != 0;
+		bool flip_v = (win->flags & TEGRA_WIN_FLAG_FLIP_V) != 0;
 		bool yuvp = tegra_dc_is_yuv_planar(win->fmt);
 
 		if (win->z != dc->blend.z[win->idx]) {
@@ -586,12 +588,14 @@ int tegra_dc_update_windows(struct tegra_dc_win *windows[], int n)
 					DC_WIN_LINE_STRIDE);
 		}
 		/* yuv planar h_offset must be even */
-		h_offset = (win->x * tegra_dc_fmt_bpp(win->fmt) / 8);
+		h_offset = win->x + (flip_h ? win->w - 1 : 0);
+		h_offset *= tegra_dc_fmt_bpp(win->fmt) / 8;
 		if (yuvp)
 			h_offset &= ~1;
 
 		tegra_dc_writel(dc, h_offset, DC_WINBUF_ADDR_H_OFFSET);
-		tegra_dc_writel(dc, win->y, DC_WINBUF_ADDR_V_OFFSET);
+		tegra_dc_writel(dc, win->y + (flip_v ? win->h - 1 : 0),
+				DC_WINBUF_ADDR_V_OFFSET);
 
 		val = WIN_ENABLE;
 		if (yuvp)
@@ -603,6 +607,11 @@ int tegra_dc_update_windows(struct tegra_dc_win *windows[], int n)
 			val |= H_FILTER_ENABLE;
 		if (win->h != win->out_h)
 			val |= V_FILTER_ENABLE;
+
+		if (flip_h)
+			val |= H_DIRECTION_DECREMENT;
+		if (flip_v)
+			val |= V_DIRECTION_DECREMENT;
 
 		tegra_dc_writel(dc, val, DC_WIN_WIN_OPTIONS);
 
