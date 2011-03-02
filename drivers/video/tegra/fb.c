@@ -387,6 +387,10 @@ static int tegra_fb_set_windowattr(struct tegra_fb_info *tegra_fb,
 		win->flags |= TEGRA_WIN_FLAG_BLEND_PREMULT;
 	else if (flip_win->attr.blend == TEGRA_FB_WIN_BLEND_COVERAGE)
 		win->flags |= TEGRA_WIN_FLAG_BLEND_COVERAGE;
+	win->flags |= flip_win->attr.flags & TEGRA_FB_WIN_FLAG_FLIP_H ?
+		TEGRA_WIN_FLAG_FLIP_H : 0;
+	win->flags |= flip_win->attr.flags & TEGRA_FB_WIN_FLAG_FLIP_V ?
+		TEGRA_WIN_FLAG_FLIP_V : 0;
 	win->fmt = flip_win->attr.pixformat;
 	win->x = flip_win->attr.x;
 	win->y = flip_win->attr.y;
