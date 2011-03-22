@@ -31,6 +31,7 @@
 #include <linux/io.h>
 #include <linux/delay.h>
 #include <linux/err.h>
+#include <linux/wakelock.h>
 
 #define USB_PHY_WAKEUP		0x408
 #define  USB_ID_INT_EN		(1 << 0)
@@ -52,6 +53,7 @@ struct tegra_otg_data {
 	int irq;
 	struct platform_device *host;
 	struct platform_device *pdev;
+	struct wake_lock wake_lock;
 };
 
 static inline unsigned long otg_readl(struct tegra_otg_data *tegra,
@@ -165,16 +167,20 @@ static irqreturn_t tegra_otg_irq_thread(int irq, void *data)
 					      tegra_state_name(to));
 
 	if (to == OTG_STATE_A_SUSPEND) {
-		if (from == OTG_STATE_A_HOST && tegra->host)
+		if (from == OTG_STATE_A_HOST && tegra->host) {
 			tegra_stop_host(tegra);
+			wake_unlock(&tega->wake_lock);
+		}
 		else if (from == OTG_STATE_B_PERIPHERAL && otg->gadget)
 			usb_gadget_vbus_disconnect(otg->gadget);
 	} else if (to == OTG_STATE_B_PERIPHERAL && otg->gadget) {
 		if (from == OTG_STATE_A_SUSPEND)
 			usb_gadget_vbus_connect(otg->gadget);
 	} else if (to == OTG_STATE_A_HOST && tegra->host) {
-		if (from == OTG_STATE_A_SUSPEND)
+		if (from == OTG_STATE_A_SUSPEND) {
+			wake_lock(&tegra->wake_lock);
 			tegra_start_host(tegra);
+		}
 	}
 
 	clk_disable(tegra->clk);
@@ -325,6 +331,7 @@ static int tegra_otg_probe(struct platform_device *pdev)
 		goto err_otg;
 	}
 
+	wake_lock_init(&tegra->wake_lock, WAKE_LOCK_SUSPEND, "usb_wake_lock");
 	res = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
 	if (!res) {
 		dev_err(&pdev->dev, "Failed to get IRQ\n");
@@ -344,6 +351,7 @@ static int tegra_otg_probe(struct platform_device *pdev)
 	return 0;
 
 err_irq:
+	wake_lock_destroy(&tegra->wake_lock);
 	otg_set_transceiver(NULL);
 err_otg:
 	iounmap(tegra->regs);
@@ -362,6 +370,7 @@ static int __exit tegra_otg_remove(struct platform_device *pdev)
 	struct tegra_otg_data *tegra = platform_get_drvdata(pdev);
 
 	free_irq(tegra->irq, tegra);
+	wake_lock_destroy(&tegra->wake_lock);
 	otg_set_transceiver(NULL);
 	iounmap(tegra->regs);
 	clk_disable(tegra->clk);
