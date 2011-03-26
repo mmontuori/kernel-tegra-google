@@ -25,6 +25,7 @@
 #include <linux/irq.h>
 #include <linux/io.h>
 #include <linux/seq_file.h>
+#include <linux/kernel_stat.h>
 
 #include <asm/hardware/gic.h>
 
@@ -171,7 +172,7 @@ static void tegra_irq_handle_wake(void)
 			desc->action->name);
 
 		tegra_wake_irq_count[wake]++;
-
+		kstat_incr_wakeirqs(irq);
 		generic_handle_irq(irq);
 	}
 }
