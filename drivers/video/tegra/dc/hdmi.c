@@ -494,10 +494,11 @@ static irqreturn_t tegra_dc_hdmi_irq(int irq, void *ptr)
 	if (hdmi->suspended) {
 		hdmi->hpd_pending = true;
 	} else {
+		cancel_delayed_work(&hdmi->work);
 		if (tegra_dc_hdmi_hpd(dc))
 			schedule_delayed_work(&hdmi->work, msecs_to_jiffies(100));
 		else
-			schedule_delayed_work(&hdmi->work, msecs_to_jiffies(0));
+			schedule_delayed_work(&hdmi->work, msecs_to_jiffies(30));
 	}
 	spin_unlock_irqrestore(&hdmi->suspend_lock, flags);
 
@@ -526,7 +527,7 @@ static void tegra_dc_hdmi_resume(struct tegra_dc *dc)
 		if (tegra_dc_hdmi_hpd(dc))
 			schedule_delayed_work(&hdmi->work, msecs_to_jiffies(100));
 		else
-			schedule_delayed_work(&hdmi->work, msecs_to_jiffies(0));
+			schedule_delayed_work(&hdmi->work, msecs_to_jiffies(30));
 		hdmi->hpd_pending = false;
 	}
 	spin_unlock_irqrestore(&hdmi->suspend_lock, flags);
