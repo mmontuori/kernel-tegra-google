@@ -441,14 +441,40 @@ static bool tegra_dc_hdmi_hpd(struct tegra_dc *dc)
 		(sense == TEGRA_DC_OUT_HOTPLUG_LOW && !level);
 }
 
+/* wait for 30mS of continous true, stop after 100ms */
+static bool tegra_dc_hdmi_hpd_debounce(struct tegra_dc *dc)
+{
+	bool last;
+	int cnt;
+	const int pass = 3;
+	int max = 10;
+
+	cnt = 0;
+	while (max >= 0) {
+		last = tegra_dc_hdmi_hpd(dc);
+		if (!last)
+			cnt = 0;
+		else
+			cnt++;
+		if (cnt >= pass)
+			return true;
+		msleep(10);
+		max--;
+	}
+
+	return false;
+}
+
 static bool tegra_dc_hdmi_detect(struct tegra_dc *dc)
 {
 	struct tegra_dc_hdmi_data *hdmi = tegra_dc_get_outdata(dc);
 	struct fb_monspecs specs;
 	int err;
 
-	if (!tegra_dc_hdmi_hpd(dc))
+	if (!tegra_dc_hdmi_hpd_debounce(dc)) {
+		dev_err(&dc->ndev->dev, "hpd failed debounce check\n");
 		goto fail;
+	}
 
 	err = tegra_edid_get_monspecs(hdmi->edid, &specs);
 	if (err < 0) {
