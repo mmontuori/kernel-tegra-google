@@ -477,6 +477,14 @@ static void tegra_dc_hdmi_detect_worker(struct work_struct *work)
 	struct tegra_dc_hdmi_data *hdmi =
 		container_of(to_delayed_work(work), struct tegra_dc_hdmi_data, work);
 	struct tegra_dc *dc = hdmi->dc;
+	unsigned long flags;
+
+	spin_lock_irqsave(&hdmi->suspend_lock, flags);
+	if (hdmi->suspended) {
+		hdmi->hpd_pending = true;
+		return;
+	}
+	spin_unlock_irqrestore(&hdmi->suspend_lock, flags);
 
 	if (!tegra_dc_hdmi_detect(dc)) {
 		tegra_dc_disable(dc);
@@ -515,6 +523,7 @@ static void tegra_dc_hdmi_suspend(struct tegra_dc *dc)
 	tegra_nvhdcp_suspend(hdmi->nvhdcp);
 	spin_lock_irqsave(&hdmi->suspend_lock, flags);
 	hdmi->suspended = true;
+	cancel_delayed_work(&hdmi->work);
 	spin_unlock_irqrestore(&hdmi->suspend_lock, flags);
 }
 
