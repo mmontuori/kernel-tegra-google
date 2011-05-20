@@ -1,0 +1,8 @@
+Change-Id: I40e12bf414cb4b107c687aa7256b4b8f3e2cd926
+Verified+1: Dmitry Shmidt <dimitrysh%android.com@gtempaccount.com>
+Code-Review+2: Colin Cross <ccross@android.com>
+Submitted-by: Dmitry Shmidt <dimitrysh%android.com@gtempaccount.com>
+Submitted-at: Thu, 12 Aug 2010 18:39:39 -0700
+Reviewed-on: https://review.source.android.com/16478
+Project: kernel/tegra
+Branch: refs/heads/linux-tegra-2.6.35

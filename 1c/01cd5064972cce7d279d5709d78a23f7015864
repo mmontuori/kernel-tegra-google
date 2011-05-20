@@ -1,0 +1,8 @@
+Change-Id: I3583f52ab13c891727177eb13bde96c5ead8bd74
+Code-Review+2: Benoit Goby <benoit@android.com>
+Verified+1: Benoit Goby <benoit@android.com>
+Submitted-by: Benoit Goby <benoit@android.com>
+Submitted-at: Mon, 21 Jun 2010 11:45:40 -0700
+Reviewed-on: https://review.source.android.com/15279
+Project: kernel/tegra
+Branch: refs/heads/android-tegra-2.6.34-rc7
